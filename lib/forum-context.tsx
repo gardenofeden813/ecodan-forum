@@ -65,6 +65,15 @@ export interface Thread {
   knowledge_entry?: KnowledgeEntry | null
 }
 
+// ─── Notification settings ──────────────────────────────────────────────────
+
+export interface NotificationSettings {
+  email_on_reply: boolean
+  email_on_mention: boolean
+  email_on_resolve: boolean
+  notification_email: string | null
+}
+
 // ─── Context type ────────────────────────────────────────────────────────────
 
 interface ForumContextType {
@@ -91,6 +100,8 @@ interface ForumContextType {
   isLoading: boolean
   signOut: () => Promise<void>
   allProfiles: Profile[]
+  notificationSettings: NotificationSettings | null
+  updateNotificationSettings: (settings: Partial<NotificationSettings>) => Promise<void>
 }
 
 const ForumContext = createContext<ForumContextType | undefined>(undefined)
@@ -123,6 +134,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   const [activeTagFilter, setActiveTagFilter] = useState<Tag | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [allProfiles, setAllProfiles] = useState<Profile[]>([])
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null)
 
   // Use a ref to track the selected thread ID without causing loadThreads to re-create
   const selectedThreadIdRef = useRef<string | null>(null)
@@ -180,57 +192,51 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // ── Load threads ───────────────────────────────────────────────────────────
+  // Debounce ref to prevent rapid-fire reloads from Realtime events
+  const loadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isLoadingRef = useRef(false)
+
   // NOTE: No dependency on selectedThread state — use refs instead to avoid infinite loop
   const loadThreads = useCallback(async () => {
+    // Prevent concurrent loads
+    if (isLoadingRef.current) return
+    isLoadingRef.current = true
     setIsLoading(true)
     try {
-      const { data: threadRows } = await supabase
-        .from("threads")
-        .select("*")
-        .order("created_at", { ascending: false })
+      // Fetch all data in parallel for speed
+      const [threadResult, profileResult, messageResult, knowledgeResult] = await Promise.all([
+        supabase.from("threads").select("*").order("created_at", { ascending: false }),
+        supabase.from("profiles").select("*"),
+        supabase.from("messages").select("*").order("created_at", { ascending: true }),
+        supabase.from("knowledge_entries").select("*"),
+      ])
 
+      const threadRows = threadResult.data
       if (!threadRows) {
         setThreads([])
         return
       }
 
-      // Load all profiles for display
-      const { data: profileRows } = await supabase.from("profiles").select("*")
       const profileMap = new Map<string, Profile>(
-        (profileRows ?? []).map((p) => [p.id, p])
+        (profileResult.data ?? []).map((p) => [p.id, p])
       )
 
-      // Load all messages
-      const { data: messageRows } = await supabase
-        .from("messages")
-        .select("*")
-        .order("created_at", { ascending: true })
-
       const messagesByThread = new Map<string, Message[]>()
-      for (const msg of messageRows ?? []) {
+      for (const msg of messageResult.data ?? []) {
         const mentions = parseMentions(msg.content)
-        // attachments is stored as jsonb; ensure it's always an array
-        const attachments: Attachment[] = Array.isArray(msg.attachments)
-          ? msg.attachments
-          : []
+        const attachments: Attachment[] = Array.isArray(msg.attachments) ? msg.attachments : []
         const enriched: Message = {
           ...msg,
           profile: profileMap.get(msg.sender_id) ?? null,
           mentions,
           attachments,
         }
-        if (!messagesByThread.has(msg.thread_id)) {
-          messagesByThread.set(msg.thread_id, [])
-        }
+        if (!messagesByThread.has(msg.thread_id)) messagesByThread.set(msg.thread_id, [])
         messagesByThread.get(msg.thread_id)!.push(enriched)
       }
 
-      // Load knowledge entries
-      const { data: knowledgeRows } = await supabase
-        .from("knowledge_entries")
-        .select("*")
       const knowledgeByThread = new Map<string, KnowledgeEntry>(
-        (knowledgeRows ?? []).map((k) => [k.thread_id, k as KnowledgeEntry])
+        (knowledgeResult.data ?? []).map((k) => [k.thread_id, k as KnowledgeEntry])
       )
 
       const enrichedThreads: Thread[] = threadRows.map((row) => {
@@ -262,23 +268,32 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       const currentSelectedId = selectedThreadIdRef.current
       if (currentSelectedId) {
         const updated = enrichedThreads.find((t) => t.id === currentSelectedId)
-        if (updated) {
-          // Use the ref to the setter to avoid stale closure issues
-          setSelectedThreadRef.current(updated)
-        }
+        if (updated) setSelectedThreadRef.current(updated)
       }
     } finally {
+      isLoadingRef.current = false
       setIsLoading(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // ← empty deps: stable reference, uses refs for selectedThread
+
+  // Debounced version for Realtime triggers to avoid rapid-fire reloads
+  const debouncedLoadThreads = useCallback(() => {
+    if (loadDebounceRef.current) clearTimeout(loadDebounceRef.current)
+    loadDebounceRef.current = setTimeout(() => {
+      loadThreads()
+    }, 500)
+  }, [loadThreads])
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       setCurrentUser(user)
-      if (user) await ensureProfile(user)
+      if (user) {
+        await ensureProfile(user)
+        await loadNotificationSettings(user.id)
+      }
       await loadProfiles()
       await loadThreads()
     }
@@ -351,7 +366,9 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
       // Set the new thread ID in the ref so loadThreads will auto-select it
       selectedThreadIdRef.current = thread.id
-      await loadThreads()
+      // Don't await loadThreads here — Realtime subscription will trigger it automatically.
+      // This makes addThread return immediately so the dialog closes fast on mobile.
+      loadThreads()
     },
     [currentUser, loadThreads]
   )
@@ -374,7 +391,8 @@ export function ForumProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      await loadThreads()
+      // Don't await — Realtime will trigger loadThreads automatically
+      loadThreads()
     },
     [currentUser, loadThreads]
   )
@@ -429,6 +447,49 @@ export function ForumProvider({ children }: { children: ReactNode }) {
     },
     [threads, loadThreads]
   )
+
+  // ── Notification settings ────────────────────────────────────────────────
+  const loadNotificationSettings = useCallback(async (userId: string) => {
+    const { data } = await supabase
+      .from("notification_settings")
+      .select("*")
+      .eq("user_id", userId)
+      .single()
+    if (data) {
+      setNotificationSettings({
+        email_on_reply: data.email_on_reply ?? true,
+        email_on_mention: data.email_on_mention ?? true,
+        email_on_resolve: data.email_on_resolve ?? false,
+        notification_email: data.notification_email ?? null,
+      })
+    } else {
+      // Default settings
+      setNotificationSettings({
+        email_on_reply: true,
+        email_on_mention: true,
+        email_on_resolve: false,
+        notification_email: null,
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const updateNotificationSettings = useCallback(async (settings: Partial<NotificationSettings>) => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const merged = { ...notificationSettings, ...settings } as NotificationSettings
+    setNotificationSettings(merged)
+    await supabase
+      .from("notification_settings")
+      .upsert({
+        user_id: user.id,
+        email_on_reply: merged.email_on_reply,
+        email_on_mention: merged.email_on_mention,
+        email_on_resolve: merged.email_on_resolve,
+        notification_email: merged.notification_email,
+      }, { onConflict: "user_id" })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notificationSettings])
 
   // ── signOut ────────────────────────────────────────────────────────────────
   const signOut = useCallback(async () => {
@@ -496,6 +557,8 @@ export function ForumProvider({ children }: { children: ReactNode }) {
         isLoading,
         signOut,
         allProfiles,
+        notificationSettings,
+        updateNotificationSettings,
       }}
     >
       {children}

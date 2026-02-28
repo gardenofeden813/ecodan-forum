@@ -1,18 +1,15 @@
 "use client"
 
+import { useState } from "react"
 import {
   Search, MessageSquare, User, AtSign, Wrench, PlayCircle,
   AlertTriangle, FileQuestion, Box, Thermometer, Droplets,
-  Snowflake, Cable, Tv2, Globe, ChevronDown, LogOut, Settings, X,
+  Snowflake, Cable, Tv2, Globe, LogOut, X, Bell,
 } from "lucide-react"
+import { NotificationSettingsDialog } from "@/components/notification-settings-dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { useForum } from "@/lib/forum-context"
 import type { Category, Tag } from "@/lib/forum-data"
@@ -56,6 +53,8 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
     currentProfile,
     signOut,
   } = useForum()
+
+  const [notifOpen, setNotifOpen] = useState(false)
 
   const navItems = [
     { key: "all" as const, label: tr("allThreads"), icon: MessageSquare },
@@ -113,9 +112,17 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
   }
 
   return (
-    <div className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground overflow-hidden">
-      {/* App header */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2 sm:pt-5 sm:pb-3">
+    <>
+    {/*
+     * Use h-dvh (dynamic viewport height) so the sidebar fills the visible
+     * screen area on iOS Safari (which shrinks when the address bar hides).
+     * overflow-hidden on the outer div + overflow-y-auto on the scroll region
+     * ensures the bottom user-profile section is always visible without needing
+     * a separate ScrollArea component (which can have height issues on iOS).
+     */}
+    <div className="flex h-dvh w-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+      {/* ── App header ─────────────────────────────────────────────────────── */}
+      <div className="flex shrink-0 items-center justify-between px-4 pt-4 pb-2 sm:pt-5 sm:pb-3">
         <div className="flex items-center gap-2">
           <img src="/ecodan-logo.svg" alt="ecodan" className="h-7 w-auto" />
           <span className="text-sm font-medium text-muted-foreground">Forum</span>
@@ -131,8 +138,8 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="px-3 pb-2">
+      {/* ── Search ─────────────────────────────────────────────────────────── */}
+      <div className="shrink-0 px-3 pb-2">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -141,7 +148,6 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value)
-              // On mobile, close the sidebar and show thread list when searching
               if (e.target.value) {
                 setSelectedThread(null)
                 onCloseMobile?.()
@@ -152,9 +158,13 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
         </div>
       </div>
 
-      <Separator className="bg-sidebar-border" />
+      <Separator className="shrink-0 bg-sidebar-border" />
 
-      <ScrollArea className="flex-1 px-2">
+      {/* ── Scrollable nav area ─────────────────────────────────────────────
+           flex-1 + overflow-y-auto = this region scrolls, the header and
+           footer stay fixed.
+      ──────────────────────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto overscroll-contain px-2">
         {/* Navigation */}
         <div className="py-2">
           <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -245,12 +255,12 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
             })}
           </nav>
         </div>
-      </ScrollArea>
+      </div>
 
-      <Separator className="bg-sidebar-border" />
+      {/* ── Footer: language + user + logout — always visible ──────────────── */}
+      <Separator className="shrink-0 bg-sidebar-border" />
 
-      {/* User profile + language */}
-      <div className="flex flex-col gap-2 p-3">
+      <div className="shrink-0 flex flex-col gap-2 p-3">
         {/* Language switcher */}
         <button
           onClick={() => setLocale(locale === "en" ? "ja" : "en")}
@@ -263,7 +273,7 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
           <span className="text-foreground">{locale === "en" ? "EN" : "JA"}</span>
         </button>
 
-        {/* User info row */}
+        {/* User info + logout */}
         <div className="flex items-center gap-2">
           <div className="flex flex-1 items-center gap-2.5 rounded-xl p-2">
             <div className="relative shrink-0">
@@ -283,7 +293,16 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
               </span>
             </div>
           </div>
-          {/* Sign out button — always visible */}
+          {/* Notification settings */}
+          <button
+            onClick={() => setNotifOpen(true)}
+            title="Notification settings"
+            className="flex shrink-0 items-center justify-center size-9 rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            aria-label="Notification settings"
+          >
+            <Bell className="size-4" />
+          </button>
+          {/* Sign out — always visible, no scroll needed */}
           <button
             onClick={() => signOut()}
             title="Sign out"
@@ -295,5 +314,8 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
         </div>
       </div>
     </div>
+
+    <NotificationSettingsDialog open={notifOpen} onOpenChange={setNotifOpen} />
+    </>
   )
 }

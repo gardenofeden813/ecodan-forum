@@ -40,7 +40,7 @@ function ForumLayout() {
       {/* Sidebar - drawer on mobile, fixed on md+ */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-72 transform transition-transform duration-200 ease-out md:relative md:z-auto md:w-64 md:translate-x-0 md:transition-none lg:w-72",
+          "fixed inset-y-0 left-0 z-50 w-72 h-dvh transform transition-transform duration-200 ease-out md:relative md:z-auto md:h-full md:w-64 md:translate-x-0 md:transition-none lg:w-72",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >

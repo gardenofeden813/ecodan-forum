@@ -254,7 +254,7 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
 
       {/* Render children recursively */}
       {children.length > 0 && depth < maxDepth && (
-        <div className="mt-2 flex flex-col gap-2 pl-4 border-l-2 border-border/50">
+        <div className="mt-2 flex flex-col gap-2">
           {children.map((child) => (
             <ReplyCard
               key={child.id}
@@ -291,6 +291,28 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
 export function ThreadDetail() {
   const { tr, selectedThread, setSelectedThread, toggleThreadStatus } = useForum()
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
+  // keyboardOffset: how many px the virtual keyboard is covering at the bottom
+  const [keyboardOffset, setKeyboardOffset] = useState(0)
+
+  // Detect virtual keyboard height using visualViewport API (works on iOS Safari & Android Chrome)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+
+    const handleViewportChange = () => {
+      // The keyboard height = window.innerHeight - visualViewport.height - visualViewport.offsetTop
+      // offsetTop accounts for any top-bar changes
+      const kbHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+      setKeyboardOffset(kbHeight)
+    }
+
+    vv.addEventListener("resize", handleViewportChange)
+    vv.addEventListener("scroll", handleViewportChange)
+    return () => {
+      vv.removeEventListener("resize", handleViewportChange)
+      vv.removeEventListener("scroll", handleViewportChange)
+    }
+  }, [])
 
   const handleReplyTo = useCallback((msg: Message) => {
     setReplyingTo((prev) => (prev?.id === msg.id ? null : msg))
@@ -324,7 +346,12 @@ export function ThreadDetail() {
   const replyCount = allReplies.length
 
   return (
-    <div className="flex flex-1 flex-col bg-background overflow-hidden">
+    // The outer container shrinks when keyboard appears by using paddingBottom = keyboardOffset
+    // This pushes the ReplyComposer (sticky bottom) above the keyboard
+    <div
+      className="flex flex-1 flex-col bg-background overflow-hidden"
+      style={{ paddingBottom: keyboardOffset > 0 ? `${keyboardOffset}px` : undefined }}
+    >
       {/* Thread header */}
       <div className="flex items-start gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4">
         <button
@@ -409,7 +436,7 @@ export function ThreadDetail() {
         </Button>
       </div>
 
-      {/* Scrollable content */}
+      {/* Scrollable content — flex-1 so it fills remaining space above the composer */}
       <ScrollArea className="flex-1">
         <div className="px-4 py-4 sm:px-6 sm:py-5">
           {/* AI Summary banner (when closed, no knowledge entry yet) */}
@@ -480,14 +507,16 @@ export function ThreadDetail() {
         </div>
       </ScrollArea>
 
-      {/* Reply composer */}
-      <ReplyComposer
-        threadId={thread.id}
-        isClosed={isClosed}
-        replyingTo={replyingTo}
-        onReplySent={handleReplySent}
-        onCancelReply={() => setReplyingTo(null)}
-      />
+      {/* Reply composer — sits at the bottom, lifted above keyboard via paddingBottom on parent */}
+      <div className="shrink-0">
+        <ReplyComposer
+          threadId={thread.id}
+          isClosed={isClosed}
+          replyingTo={replyingTo}
+          onReplySent={handleReplySent}
+          onCancelReply={() => setReplyingTo(null)}
+        />
+      </div>
     </div>
   )
 }
