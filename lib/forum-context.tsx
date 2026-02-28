@@ -195,12 +195,20 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   // Debounce ref to prevent rapid-fire reloads from Realtime events
   const loadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLoadingRef = useRef(false)
+  // Track when the last load started so we can detect stuck locks
+  const loadStartTimeRef = useRef<number>(0)
 
   // NOTE: No dependency on selectedThread state — use refs instead to avoid infinite loop
   const loadThreads = useCallback(async () => {
-    // Prevent concurrent loads
-    if (isLoadingRef.current) return
+    // Prevent concurrent loads, but release the lock if it's been held for >15s (stuck)
+    if (isLoadingRef.current) {
+      const elapsed = Date.now() - loadStartTimeRef.current
+      if (elapsed < 15000) return
+      // Lock has been held too long — force-release and proceed
+      console.warn("loadThreads: force-releasing stuck lock after", elapsed, "ms")
+    }
     isLoadingRef.current = true
+    loadStartTimeRef.current = Date.now()
     setIsLoading(true)
     try {
       // Fetch all data in parallel for speed
@@ -327,9 +335,17 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   // ── addThread ──────────────────────────────────────────────────────────────
   const addThread = useCallback(
     async (title: string, body: string, category: Category, _tags: Tag[]) => {
-      // Always get the latest user from supabase to avoid stale closure issues
-      const { data: { user } } = await supabase.auth.getUser()
-      const uid = user?.id ?? currentUser?.id
+      // Get the current user — use cached value first, fall back to fresh fetch
+      let uid = currentUser?.id
+      if (!uid) {
+        // Add a timeout to prevent hanging on mobile
+        const authPromise = supabase.auth.getUser()
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Auth timeout")), 8000)
+        )
+        const { data: { user } } = await Promise.race([authPromise, timeoutPromise]) as Awaited<typeof authPromise>
+        uid = user?.id
+      }
       if (!uid) {
         throw new Error("Not authenticated")
       }
@@ -366,9 +382,13 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
       // Set the new thread ID in the ref so loadThreads will auto-select it
       selectedThreadIdRef.current = thread.id
-      // Don't await loadThreads here — Realtime subscription will trigger it automatically.
-      // This makes addThread return immediately so the dialog closes fast on mobile.
-      loadThreads()
+
+      // Force-release the load lock so loadThreads can run even if a previous
+      // load is "stuck" (can happen on mobile after a slow network request)
+      isLoadingRef.current = false
+
+      // Reload threads immediately (don't rely solely on Realtime on mobile)
+      await loadThreads()
     },
     [currentUser, loadThreads]
   )

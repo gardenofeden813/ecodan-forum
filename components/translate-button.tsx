@@ -11,8 +11,21 @@ interface TranslateButtonProps {
   className?: string
 }
 
+/**
+ * Detect whether the text is primarily Japanese.
+ * Returns true if more than 10% of characters are Japanese (hiragana, katakana, CJK).
+ */
+function isJapanese(text: string): boolean {
+  const japanesePattern = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF]/g
+  const matches = text.match(japanesePattern)
+  if (!matches) return false
+  // Consider it Japanese if at least 10% of non-whitespace chars are Japanese
+  const nonWhitespace = text.replace(/\s/g, "").length
+  return nonWhitespace > 0 && matches.length / nonWhitespace >= 0.1
+}
+
 export function TranslateButton({ text, onTranslated, isTranslated, className }: TranslateButtonProps) {
-  const { tr, locale } = useForum()
+  const { tr } = useForum()
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -23,8 +36,8 @@ export function TranslateButton({ text, onTranslated, isTranslated, className }:
       return
     }
 
-    // Always translate to the opposite of the current UI locale
-    const targetLang = locale === "en" ? "ja" : "en"
+    // Auto-detect: if text is Japanese → translate to English, otherwise → translate to Japanese
+    const targetLang = isJapanese(text) ? "en" : "ja"
 
     setIsPending(true)
     setError(null)
