@@ -48,10 +48,10 @@ export async function POST(request: NextRequest) {
 
     // Build conversation text for AI
     const conversationText = [
-      `【スレッドタイトル】${threadTitle}`,
-      `【最初の投稿】\n${threadContent}`,
+      `[Thread Title] ${threadTitle}`,
+      `[Original Post]\n${threadContent}`,
       messages && messages.length > 0
-        ? `【返信】\n${messages.map((m: { author: string; content: string }) => `${m.author}: ${m.content}`).join("\n\n")}`
+        ? `[Replies]\n${messages.map((m: { author: string; content: string }) => `${m.author}: ${m.content}`).join("\n\n")}`
         : "",
     ]
       .filter(Boolean)
@@ -68,16 +68,16 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: "system",
-          content: `あなたはEcodan（三菱電機のヒートポンプシステム）の技術サポートフォーラムのアシスタントです。
-解決済みスレッドの内容を要約して、将来の参照に役立つナレッジベースエントリを作成してください。
-要約は以下の形式でJSON出力してください：
+          content: `You are a technical support assistant for the ecodan forum, a community for Mitsubishi Electric heat pump systems.
+When a thread is marked as resolved, summarize the issue and solution clearly and concisely for future reference in the knowledge base.
+Respond in English only. Output valid JSON in the following format:
 {
-  "summary": "問題の概要と解決策を200字以内で簡潔に記述"
+  "summary": "A concise summary (2-4 sentences) describing the problem and how it was resolved."
 }`,
         },
         {
           role: "user",
-          content: `以下のフォーラムスレッドを要約してください：\n\n${conversationText}`,
+          content: `Please summarize the following resolved support thread:\n\n${conversationText}`,
         },
       ],
       response_format: { type: "json_object" },
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     })
 
     const result = JSON.parse(completion.choices[0].message.content || "{}")
-    const summaryContent = result.summary || "要約を生成できませんでした。"
+    const summaryContent = result.summary || "No summary could be generated."
 
     // Save to knowledge_entries
     const { data: entry, error: insertError } = await supabase

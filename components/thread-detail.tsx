@@ -266,14 +266,14 @@ export function ThreadDetail() {
       {/* Scrollable content */}
       <ScrollArea className="flex-1">
         <div className="px-4 py-4 sm:px-6 sm:py-5">
-          {/* AI Summary banner (when closed) */}
-          {isClosed && (
+          {/* AI Summary banner (when closed, no knowledge entry yet) */}
+          {isClosed && !thread.knowledge_entry && (
             <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-[#0091ea]/20 bg-[#0091ea]/5 px-4 py-3">
               <BookOpen className="mt-0.5 size-4 shrink-0 text-[#0091ea]" />
               <div>
                 <p className="text-xs font-semibold text-[#0091ea]">AI Summary</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  このスレッドは解決済みです。AIが内容を要約してナレッジベースに保存しました。
+                  This thread has been marked as resolved. An AI summary will be saved to the knowledge base shortly.
                 </p>
               </div>
             </div>
@@ -283,6 +283,34 @@ export function ThreadDetail() {
           <TranslatableText text={thread.body} />
 
           <Separator className="my-5 sm:my-6" />
+
+          {/* Knowledge Entry — shown between original post and replies when resolved */}
+          {thread.knowledge_entry && (
+            <>
+              <div className="mb-5 rounded-xl border border-[#0091ea]/25 bg-[#0091ea]/5 px-4 py-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <BookOpen className="size-4 shrink-0 text-[#0091ea]" />
+                  <p className="text-xs font-semibold text-[#0091ea]">AI-Generated Summary</p>
+                </div>
+                <p className="text-sm leading-relaxed text-foreground/90">
+                  {thread.knowledge_entry.summary_content}
+                </p>
+                {thread.knowledge_entry.tags && thread.knowledge_entry.tags.length > 0 && (
+                  <div className="mt-2.5 flex flex-wrap gap-1">
+                    {thread.knowledge_entry.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center rounded-md bg-[#0091ea]/10 px-2 py-0.5 text-[10px] font-medium text-[#0091ea]"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <Separator className="mb-5 sm:mb-6" />
+            </>
+          )}
 
           {/* Replies */}
           <div className="flex flex-col gap-1">

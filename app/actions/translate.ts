@@ -1,6 +1,6 @@
 "use server"
 
-export type TranslateResult = 
+export type TranslateResult =
   | { success: true; translatedText: string }
   | { success: false; error: string }
 
@@ -8,64 +8,53 @@ export async function translateText(
   text: string,
   targetLang: "ja" | "en"
 ): Promise<TranslateResult> {
-  // Google Translate API requires GOOGLE_TRANSLATE_API_KEY environment variable
-  const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY
+  if (!text.trim()) return { success: true, translatedText: text }
 
+  const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
-    // If no API key, return a mock translation for demo purposes
-    // In production, this should return an error
-    console.warn("[v0] GOOGLE_TRANSLATE_API_KEY not set, using demo mode")
-    
-    // Demo: Just indicate that translation would happen
-    if (targetLang === "ja") {
-      return {
-        success: true,
-        translatedText: `[Translated to Japanese]\n${text}`,
-      }
-    } else {
-      return {
-        success: true,
-        translatedText: `[Translated to English]\n${text}`,
-      }
-    }
+    return { success: false, error: "Translation service is not configured." }
   }
 
-  try {
-    const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`
+  const targetLanguage = targetLang === "ja" ? "Japanese" : "English"
 
-    const response = await fetch(url, {
+  try {
+    const baseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"
+    const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        q: text,
-        target: targetLang,
-        format: "text",
+        model: "gpt-4.1-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are a professional translator. Translate the user's message into ${targetLanguage}. Output only the translated text — no explanations, no quotes, no extra commentary.`,
+          },
+          { role: "user", content: text },
+        ],
+        max_tokens: 1000,
+        temperature: 0.3,
       }),
     })
 
     if (!response.ok) {
-      const errorData = await response.json()
-      console.error("[v0] Google Translate API error:", errorData)
-      return {
-        success: false,
-        error: "Translation service unavailable",
-      }
+      const err = await response.json().catch(() => ({}))
+      console.error("OpenAI translate error:", err)
+      return { success: false, error: "Translation service unavailable." }
     }
 
     const data = await response.json()
-    const translatedText = data.data.translations[0].translatedText
+    const translatedText = data.choices?.[0]?.message?.content?.trim() ?? ""
 
-    return {
-      success: true,
-      translatedText,
+    if (!translatedText) {
+      return { success: false, error: "Empty translation response." }
     }
+
+    return { success: true, translatedText }
   } catch (error) {
-    console.error("[v0] Translation error:", error)
-    return {
-      success: false,
-      error: "Failed to translate",
-    }
+    console.error("Translation error:", error)
+    return { success: false, error: "Failed to translate. Please try again." }
   }
 }

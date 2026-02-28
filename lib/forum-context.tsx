@@ -39,6 +39,15 @@ export interface Message {
   attachments?: Attachment[]
 }
 
+export interface KnowledgeEntry {
+  id: string
+  thread_id: string
+  title: string
+  summary_content: string
+  tags: string[]
+  created_at: string
+}
+
 export interface Thread {
   id: string
   title: string
@@ -51,6 +60,7 @@ export interface Thread {
   mentions: string[]
   tags: Tag[]
   body: string // first message content
+  knowledge_entry?: KnowledgeEntry | null
 }
 
 // ─── Context type ────────────────────────────────────────────────────────────
@@ -197,6 +207,14 @@ export function ForumProvider({ children }: { children: ReactNode }) {
         messagesByThread.get(msg.thread_id)!.push(enriched)
       }
 
+      // Load knowledge entries
+      const { data: knowledgeRows } = await supabase
+        .from("knowledge_entries")
+        .select("*")
+      const knowledgeByThread = new Map<string, KnowledgeEntry>(
+        (knowledgeRows ?? []).map((k) => [k.thread_id, k as KnowledgeEntry])
+      )
+
       const enrichedThreads: Thread[] = threadRows.map((row) => {
         const msgs = messagesByThread.get(row.id) ?? []
         const firstMsg = msgs[0]
@@ -216,6 +234,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
           mentions,
           tags,
           body,
+          knowledge_entry: knowledgeByThread.get(row.id) ?? null,
         }
       })
 

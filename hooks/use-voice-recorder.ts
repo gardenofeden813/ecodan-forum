@@ -6,6 +6,7 @@ interface VoiceRecorderState {
   isRecording: boolean
   duration: number
   audioUrl: string | null
+  audioBlob: Blob | null
   error: string | null
 }
 
@@ -14,6 +15,7 @@ export function useVoiceRecorder() {
     isRecording: false,
     duration: 0,
     audioUrl: null,
+    audioBlob: null,
     error: null,
   })
 
@@ -37,13 +39,13 @@ export function useVoiceRecorder() {
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: "audio/webm" })
         const url = URL.createObjectURL(blob)
-        setState((prev) => ({ ...prev, audioUrl: url, isRecording: false }))
+        setState((prev) => ({ ...prev, audioUrl: url, audioBlob: blob, isRecording: false }))
         stream.getTracks().forEach((track) => track.stop())
       }
 
       mediaRecorder.start()
 
-      setState({ isRecording: true, duration: 0, audioUrl: null, error: null })
+      setState({ isRecording: true, duration: 0, audioUrl: null, audioBlob: null, error: null })
 
       timerRef.current = setInterval(() => {
         setState((prev) => ({ ...prev, duration: prev.duration + 1 }))
@@ -71,7 +73,7 @@ export function useVoiceRecorder() {
     if (state.audioUrl) {
       URL.revokeObjectURL(state.audioUrl)
     }
-    setState({ isRecording: false, duration: 0, audioUrl: null, error: null })
+    setState({ isRecording: false, duration: 0, audioUrl: null, audioBlob: null, error: null })
   }, [state.audioUrl])
 
   return {

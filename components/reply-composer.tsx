@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { ImagePlus, Mic, MicOff, X, Send, Play, Pause, Square } from "lucide-react"
+import { ImagePlus, Mic, MicOff, X, Send, Play, Pause, Square, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { MentionTextarea } from "@/components/mention-textarea"
 import { useForum } from "@/lib/forum-context"
@@ -13,13 +13,29 @@ interface ReplyComposerProps {
   threadId: string
 }
 
+// Upload a file to Supabase Storage via the /api/upload endpoint
+async function uploadToStorage(file: File | Blob, filename: string): Promise<string> {
+  const formData = new FormData()
+  formData.append("file", file, filename)
+  formData.append("bucket", "attachments")
+
+  const res = await fetch("/api/upload", { method: "POST", body: formData })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? "Upload failed")
+  }
+  const data = await res.json()
+  return data.url as string
+}
+
 export function ReplyComposer({ threadId }: ReplyComposerProps) {
   const { tr, addReply } = useForum()
   const [replyText, setReplyText] = useState("")
   const [images, setImages] = useState<{ id: string; url: string; name: string; file: File }[]>([])
-  const [voiceAttachment, setVoiceAttachment] = useState<{ url: string; duration: number } | null>(null)
+  const [voiceAttachment, setVoiceAttachment] = useState<{ url: string; duration: number; blob?: Blob } | null>(null)
   const [isPlayingVoice, setIsPlayingVoice] = useState(false)
   const [currentPlayTime, setCurrentPlayTime] = useState(0)
+  const [isPosting, setIsPosting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
 
@@ -27,6 +43,7 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
     isRecording,
     duration,
     audioUrl,
+    audioBlob,
     startRecording,
     stopRecording,
     clearRecording,
@@ -36,16 +53,11 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-
-    const updateTime = () => {
-      setCurrentPlayTime(audio.currentTime)
-    }
-
+    const updateTime = () => setCurrentPlayTime(audio.currentTime)
     audio.addEventListener("timeupdate", updateTime)
     return () => audio.removeEventListener("timeupdate", updateTime)
   }, [voiceAttachment])
 
-  // When recording finishes, save it
   const handleStopRecording = useCallback(() => {
     stopRecording()
   }, [stopRecording])
@@ -53,10 +65,10 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
   // Accept recording into attachments
   const handleAcceptRecording = useCallback(() => {
     if (audioUrl) {
-      setVoiceAttachment({ url: audioUrl, duration })
+      setVoiceAttachment({ url: audioUrl, duration, blob: audioBlob ?? undefined })
       clearRecording()
     }
-  }, [audioUrl, duration, clearRecording])
+  }, [audioUrl, duration, audioBlob, clearRecording])
 
   const handleDiscardRecording = useCallback(() => {
     clearRecording()
@@ -100,48 +112,81 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
     }
   }
 
-  // Post
-  const handlePost = () => {
+  // Post — upload files first, then save message
+  const handlePost = async () => {
     const hasContent = replyText.trim() || images.length > 0 || voiceAttachment
-    if (!hasContent) return
+    if (!hasContent || isPosting) return
 
-    const attachments: Attachment[] = []
-    images.forEach((img) => {
-      attachments.push({
-        id: img.id,
-        type: "image",
-        url: img.url,
-        name: img.name,
-      })
-    })
-    if (voiceAttachment) {
-      attachments.push({
-        id: `voice-${Date.now()}`,
-        type: "voice",
-        url: voiceAttachment.url,
-        name: "voice-message.webm",
-        duration: voiceAttachment.duration,
-      })
+    setIsPosting(true)
+    try {
+      const attachments: Attachment[] = []
+
+      // Upload images to Supabase Storage
+      for (const img of images) {
+        try {
+          const persistentUrl = await uploadToStorage(img.file, img.name)
+          attachments.push({
+            id: img.id,
+            type: "image",
+            url: persistentUrl,
+            name: img.name,
+          })
+        } catch (err) {
+          console.error("Image upload failed:", err)
+          // Fall back to blob URL so the message still posts
+          attachments.push({ id: img.id, type: "image", url: img.url, name: img.name })
+        }
+      }
+
+      // Upload voice to Supabase Storage
+      if (voiceAttachment) {
+        try {
+          const blob = voiceAttachment.blob ?? await fetch(voiceAttachment.url).then((r) => r.blob())
+          const ext = blob.type.includes("ogg") ? "ogg" : "webm"
+          const persistentUrl = await uploadToStorage(blob, `voice-${Date.now()}.${ext}`)
+          attachments.push({
+            id: `voice-${Date.now()}`,
+            type: "voice",
+            url: persistentUrl,
+            name: `voice-message.${ext}`,
+            duration: voiceAttachment.duration,
+          })
+        } catch (err) {
+          console.error("Voice upload failed:", err)
+          attachments.push({
+            id: `voice-${Date.now()}`,
+            type: "voice",
+            url: voiceAttachment.url,
+            name: "voice-message.webm",
+            duration: voiceAttachment.duration,
+          })
+        }
+      }
+
+      await addReply(threadId, replyText.trim(), attachments.length > 0 ? attachments : undefined)
+
+      // Reset state
+      setReplyText("")
+      images.forEach((img) => URL.revokeObjectURL(img.url))
+      setImages([])
+      setVoiceAttachment(null)
+      setCurrentPlayTime(0)
+      setIsPlayingVoice(false)
+      clearRecording()
+    } finally {
+      setIsPosting(false)
     }
-
-    addReply(threadId, replyText.trim(), attachments.length > 0 ? attachments : undefined)
-    // Reset all state to allow new posts
-    setReplyText("")
-    setImages([])
-    setVoiceAttachment(null)
-    setCurrentPlayTime(0)
-    setIsPlayingVoice(false)
-    clearRecording()
   }
 
   const hasContent = replyText.trim() || images.length > 0 || voiceAttachment
-  const formatDuration = (s: number) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`
-  
-  // Calculate remaining time for voice playback
+  const formatDuration = (s: number) =>
+    `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`
+
   const remainingTime = voiceAttachment ? Math.max(0, voiceAttachment.duration - currentPlayTime) : 0
-  const progressPercent = voiceAttachment && voiceAttachment.duration > 0 
-    ? (currentPlayTime / voiceAttachment.duration) * 100 
-    : 0
+  const progressPercent =
+    voiceAttachment && voiceAttachment.duration > 0
+      ? (currentPlayTime / voiceAttachment.duration) * 100
+      : 0
 
   return (
     <div className="border-t border-border bg-card px-3 py-3 sm:px-6 sm:py-4">
@@ -170,9 +215,8 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
       {/* Voice attachment preview with playback */}
       {voiceAttachment && !isRecording && (
         <div className="mb-3 overflow-hidden rounded-xl border border-primary/20 bg-primary/5">
-          {/* Progress bar */}
           <div className="h-1 w-full bg-primary/10">
-            <div 
+            <div
               className="h-full bg-primary transition-all duration-100"
               style={{ width: `${progressPercent}%` }}
             />
@@ -188,10 +232,9 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
               <span className="text-sm font-medium text-foreground">{tr("voiceMessage")}</span>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="tabular-nums">
-                  {isPlayingVoice 
+                  {isPlayingVoice
                     ? tr("remainingTime", { n: Math.ceil(remainingTime) })
-                    : formatDuration(voiceAttachment.duration)
-                  }
+                    : formatDuration(voiceAttachment.duration)}
                 </span>
               </div>
             </div>
@@ -240,11 +283,23 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
       {audioUrl && !isRecording && !voiceAttachment && (
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-4 py-3">
           <Mic className="size-4 text-primary" />
-          <span className="flex-1 text-sm text-foreground">{tr("voiceMessage")} ({formatDuration(duration)})</span>
-          <Button size="sm" variant="ghost" onClick={handleDiscardRecording} className="h-7 rounded-lg text-xs text-muted-foreground">
-            <X className="mr-1 size-3" />{tr("removeAttachment")}
+          <span className="flex-1 text-sm text-foreground">
+            {tr("voiceMessage")} ({formatDuration(duration)})
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleDiscardRecording}
+            className="h-7 rounded-lg text-xs text-muted-foreground"
+          >
+            <X className="mr-1 size-3" />
+            {tr("removeAttachment")}
           </Button>
-          <Button size="sm" onClick={handleAcceptRecording} className="h-7 rounded-lg text-xs bg-primary text-primary-foreground">
+          <Button
+            size="sm"
+            onClick={handleAcceptRecording}
+            className="h-7 rounded-lg text-xs bg-primary text-primary-foreground"
+          >
             {tr("attachVoice")}
           </Button>
         </div>
@@ -277,7 +332,7 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
               variant="ghost"
               size="sm"
               onClick={() => fileInputRef.current?.click()}
-              disabled={images.length >= 4 || isRecording}
+              disabled={images.length >= 4 || isRecording || isPosting}
               className="h-9 gap-1.5 rounded-lg px-3 text-muted-foreground hover:text-foreground"
               aria-label={tr("attachImage")}
             >
@@ -285,13 +340,13 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
               <span className="hidden text-xs sm:inline">{tr("attachImage")}</span>
             </Button>
 
-            {/* Voice record - allow recording even if voice attached (will replace) */}
+            {/* Voice record */}
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={isRecording ? handleStopRecording : startRecording}
-              disabled={false}
+              disabled={isPosting}
               className={cn(
                 "h-9 gap-1.5 rounded-lg px-3",
                 isRecording
@@ -310,12 +365,18 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
           {/* Send */}
           <Button
             onClick={handlePost}
-            disabled={!hasContent || isRecording}
+            disabled={!hasContent || isRecording || isPosting}
             size="sm"
             className="h-9 gap-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            <Send className="size-3.5" />
-            <span className="hidden sm:inline">{tr("postReply")}</span>
+            {isPosting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Send className="size-3.5" />
+            )}
+            <span className="hidden sm:inline">
+              {isPosting ? "Sending..." : tr("postReply")}
+            </span>
           </Button>
         </div>
       </div>
