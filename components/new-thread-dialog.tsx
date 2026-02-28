@@ -33,14 +33,21 @@ export function NewThreadDialog({ open, onOpenChange }: NewThreadDialogProps) {
     )
   }
 
-  const handleSubmit = () => {
-    if (!title.trim() || !body.trim()) return
-    addThread(title.trim(), body.trim(), category, selectedTags)
-    setTitle("")
-    setBody("")
-    setCategory("installation")
-    setSelectedTags([])
-    onOpenChange(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmit = async () => {
+    if (!title.trim() || !body.trim() || isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      await addThread(title.trim(), body.trim(), category, selectedTags)
+      setTitle("")
+      setBody("")
+      setCategory("installation")
+      setSelectedTags([])
+      onOpenChange(false)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -126,10 +133,18 @@ export function NewThreadDialog({ open, onOpenChange }: NewThreadDialogProps) {
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={!title.trim() || !body.trim()}
+              disabled={!title.trim() || !body.trim() || isSubmitting}
               className="w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto rounded-xl"
             >
-              {tr("create")}
+              {isSubmitting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  {tr("create")}
+                </span>
+              ) : tr("create")}
             </Button>
           </div>
         </div>

@@ -332,14 +332,19 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
       // Insert first message as body
       if (body.trim()) {
-        await supabase.from("messages").insert({
+        const { error: msgError } = await supabase.from("messages").insert({
           thread_id: thread.id,
           content: body,
           sender_id: currentUser.id,
           attachments: [],
         })
+        if (msgError) {
+          console.error("Message insert error:", msgError)
+        }
       }
 
+      // Set the new thread ID in the ref so loadThreads will auto-select it
+      selectedThreadIdRef.current = thread.id
       await loadThreads()
     },
     [currentUser, loadThreads]
