@@ -26,7 +26,7 @@ export default function LoginPage() {
 
     try {
       if (isSignUp) {
-        // まずサインアップを試みる
+        // Attempt sign-up
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
@@ -36,14 +36,14 @@ export default function LoginPage() {
         })
         if (signUpError) throw signUpError
 
-        // セッションがあればそのままログイン済み（Confirm email OFF の場合）
+        // If session exists, email confirmation is off — log in directly
         if (signUpData.session) {
           router.push("/")
           router.refresh()
           return
         }
 
-        // セッションがなければ（Confirm email ON）パスワードでログインを試みる
+        // Try signing in immediately (works when email confirmation is disabled)
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email,
           password,
@@ -54,8 +54,8 @@ export default function LoginPage() {
           return
         }
 
-        // どちらも失敗した場合のみメール確認メッセージを表示
-        setMessage("確認メールを送信しました。メールをご確認ください。")
+        // Only show email confirmation message as a last resort
+        setMessage("We've sent you a confirmation email. Please check your inbox to activate your account.")
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -66,8 +66,17 @@ export default function LoginPage() {
         router.refresh()
       }
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "エラーが発生しました"
-      setError(errorMessage)
+      const msg = err instanceof Error ? err.message : "Something went wrong. Please try again."
+      // Make common Supabase error messages more user-friendly
+      if (msg.includes("Invalid login credentials")) {
+        setError("Incorrect email or password. Please try again.")
+      } else if (msg.includes("User already registered")) {
+        setError("An account with this email already exists. Try signing in instead.")
+      } else if (msg.includes("Password should be at least")) {
+        setError("Your password must be at least 6 characters long.")
+      } else {
+        setError(msg)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -83,7 +92,7 @@ export default function LoginPage() {
           </div>
           <div className="text-center">
             <h1 className="text-xl font-semibold tracking-tight text-foreground">
-              Ecodan Forum
+              ecodan forum
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Heat Pump Support Community
@@ -94,13 +103,13 @@ export default function LoginPage() {
         {/* Card */}
         <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
           <h2 className="mb-5 text-base font-semibold text-foreground">
-            {isSignUp ? "アカウント作成" : "ログイン"}
+            {isSignUp ? "Create an account" : "Sign in"}
           </h2>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="email" className="text-xs font-medium">
-                メールアドレス
+                Email address
               </Label>
               <Input
                 id="email"
@@ -115,7 +124,7 @@ export default function LoginPage() {
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="password" className="text-xs font-medium">
-                パスワード
+                Password
               </Label>
               <Input
                 id="password"
@@ -127,6 +136,11 @@ export default function LoginPage() {
                 minLength={6}
                 className="h-9 rounded-xl text-sm"
               />
+              {isSignUp && (
+                <p className="text-[11px] text-muted-foreground">
+                  Must be at least 6 characters.
+                </p>
+              )}
             </div>
 
             {error && (
@@ -147,7 +161,7 @@ export default function LoginPage() {
               className="h-9 w-full rounded-xl bg-green-600 text-sm font-medium text-white hover:bg-green-700"
             >
               {isLoading && <Loader2 className="mr-2 size-4 animate-spin" />}
-              {isSignUp ? "アカウントを作成" : "ログイン"}
+              {isSignUp ? "Create account" : "Sign in"}
             </Button>
           </form>
 
@@ -162,8 +176,8 @@ export default function LoginPage() {
               className="text-xs text-muted-foreground underline-offset-4 hover:underline"
             >
               {isSignUp
-                ? "すでにアカウントをお持ちの方はこちら"
-                : "アカウントをお持ちでない方はこちら"}
+                ? "Already have an account? Sign in"
+                : "Don't have an account? Sign up"}
             </button>
           </div>
         </div>
