@@ -48,11 +48,11 @@ function ForumLayout() {
       </aside>
 
       {/* Main content area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Thread list - visible when no thread selected on mobile, always on md+ */}
         <div
           className={cn(
-            "w-full md:flex-none md:w-80 lg:w-96",
+            "w-full md:flex-none md:w-80 lg:w-96 min-h-0",
             selectedThread ? "hidden md:flex" : "flex"
           )}
         >
@@ -62,7 +62,7 @@ function ForumLayout() {
         {/* Thread detail - full screen on mobile when thread selected, flex-1 on md+ */}
         <div
           className={cn(
-            "flex-1",
+            "flex-1 min-h-0",
             selectedThread ? "flex" : "hidden md:flex"
           )}
         >

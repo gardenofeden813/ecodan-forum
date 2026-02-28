@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { useForum } from "@/lib/forum-context"
 import { getCategoryColor, getTagColor } from "@/lib/forum-data"
 import { cn } from "@/lib/utils"
@@ -30,7 +29,7 @@ export function ThreadList() {
   const [showNewThread, setShowNewThread] = useState(false)
 
   return (
-    <div className="flex h-full w-full flex-col border-r border-border bg-card md:w-80 lg:w-96">
+    <div className="flex h-full w-full flex-col border-r border-border bg-card md:w-80 lg:w-96 min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
         <h2 className="text-sm font-semibold text-foreground">{tr("threads")}</h2>
@@ -68,7 +67,7 @@ export function ThreadList() {
       </div>
 
       {/* Thread list */}
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -169,7 +168,7 @@ export function ThreadList() {
             })}
           </div>
         )}
-      </ScrollArea>
+      </div>
 
       {/* New thread dialog */}
       <NewThreadDialog open={showNewThread} onOpenChange={setShowNewThread} />

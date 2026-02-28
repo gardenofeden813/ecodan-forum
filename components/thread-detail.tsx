@@ -5,7 +5,6 @@ import { ArrowLeft, MessageSquare, Play, Pause, CheckCircle2, CircleDot, BookOpe
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { useForum } from "@/lib/forum-context"
 import { getCategoryColor, getTagColor } from "@/lib/forum-data"
@@ -291,28 +290,18 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
 export function ThreadDetail() {
   const { tr, selectedThread, setSelectedThread, toggleThreadStatus } = useForum()
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
-  // keyboardOffset: how many px the virtual keyboard is covering at the bottom
-  const [keyboardOffset, setKeyboardOffset] = useState(0)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
 
-  // Detect virtual keyboard height using visualViewport API (works on iOS Safari & Android Chrome)
+  // Scroll the reply composer into view when the keyboard appears or replyingTo changes
   useEffect(() => {
-    const vv = window.visualViewport
-    if (!vv) return
-
-    const handleViewportChange = () => {
-      // The keyboard height = window.innerHeight - visualViewport.height - visualViewport.offsetTop
-      // offsetTop accounts for any top-bar changes
-      const kbHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
-      setKeyboardOffset(kbHeight)
-    }
-
-    vv.addEventListener("resize", handleViewportChange)
-    vv.addEventListener("scroll", handleViewportChange)
-    return () => {
-      vv.removeEventListener("resize", handleViewportChange)
-      vv.removeEventListener("scroll", handleViewportChange)
-    }
-  }, [])
+    if (!composerRef.current) return
+    // Small delay to allow layout to settle after keyboard opens
+    const timer = setTimeout(() => {
+      composerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [replyingTo])
 
   const handleReplyTo = useCallback((msg: Message) => {
     setReplyingTo((prev) => (prev?.id === msg.id ? null : msg))
@@ -346,14 +335,10 @@ export function ThreadDetail() {
   const replyCount = allReplies.length
 
   return (
-    // The outer container shrinks when keyboard appears by using paddingBottom = keyboardOffset
-    // This pushes the ReplyComposer (sticky bottom) above the keyboard
-    <div
-      className="flex flex-1 flex-col bg-background overflow-hidden"
-      style={{ paddingBottom: keyboardOffset > 0 ? `${keyboardOffset}px` : undefined }}
-    >
+    // Use flex-col with overflow-hidden; the scroll area is a plain div with overflow-y-auto
+    <div className="flex flex-1 flex-col bg-background overflow-hidden min-h-0">
       {/* Thread header */}
-      <div className="flex items-start gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4">
+      <div className="flex items-start gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4 shrink-0">
         <button
           onClick={() => setSelectedThread(null)}
           className="mt-0.5 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
@@ -421,7 +406,7 @@ export function ThreadDetail() {
       </div>
 
       {/* Mobile status toggle */}
-      <div className="flex border-b border-border px-4 py-2 sm:hidden">
+      <div className="flex border-b border-border px-4 py-2 sm:hidden shrink-0">
         <Button
           variant="outline"
           size="sm"
@@ -436,8 +421,8 @@ export function ThreadDetail() {
         </Button>
       </div>
 
-      {/* Scrollable content — flex-1 so it fills remaining space above the composer */}
-      <ScrollArea className="flex-1">
+      {/* Scrollable content — native overflow-y-auto for reliable mobile scrolling */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="px-4 py-4 sm:px-6 sm:py-5">
           {/* AI Summary banner (when closed, no knowledge entry yet) */}
           {isClosed && !thread.knowledge_entry && (
@@ -505,10 +490,10 @@ export function ThreadDetail() {
             </div>
           </div>
         </div>
-      </ScrollArea>
+      </div>
 
-      {/* Reply composer — sits at the bottom, lifted above keyboard via paddingBottom on parent */}
-      <div className="shrink-0">
+      {/* Reply composer — always at the bottom, never hidden */}
+      <div ref={composerRef} className="shrink-0">
         <ReplyComposer
           threadId={thread.id}
           isClosed={isClosed}
