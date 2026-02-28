@@ -1,0 +1,291 @@
+"use client"
+
+import { Search, MessageSquare, User, AtSign, Wrench, PlayCircle, AlertTriangle, FileQuestion, Box, Thermometer, Droplets, Snowflake, Cable, Tv2, Globe, ChevronDown, LogOut, Settings, X } from "lucide-react"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
+import { useForum } from "@/lib/forum-context"
+import { currentUser } from "@/lib/forum-data"
+import type { Category, Tag } from "@/lib/forum-data"
+import { cn } from "@/lib/utils"
+
+const categoryIcons: Record<Category, typeof Wrench> = {
+  installation: Wrench,
+  commissioning: PlayCircle,
+  troubleshooting: AlertTriangle,
+  spec_consultation: FileQuestion,
+}
+
+const tagIcons: Record<Tag, typeof Box> = {
+  outdoor_unit: Box,
+  hydrobox: Droplets,
+  remote: Tv2,
+  wiring: Cable,
+  heating: Thermometer,
+  hot_water: Droplets,
+  cooling: Snowflake,
+}
+
+interface ForumSidebarProps {
+  onCloseMobile?: () => void
+}
+
+export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
+  const {
+    locale,
+    setLocale,
+    tr,
+    searchQuery,
+    setSearchQuery,
+    activeFilter,
+    setActiveFilter,
+    activeCategoryFilter,
+    setActiveCategoryFilter,
+    activeTagFilter,
+    setActiveTagFilter,
+    setSelectedThread,
+  } = useForum()
+
+  const navItems = [
+    { key: "all" as const, label: tr("allThreads"), icon: MessageSquare },
+    { key: "my" as const, label: tr("myThreads"), icon: User },
+    { key: "mentioned" as const, label: tr("mentioned"), icon: AtSign },
+  ]
+
+  const categories: { key: Category; labelKey: "installation" | "commissioning" | "troubleshooting" | "spec_consultation" }[] = [
+    { key: "installation", labelKey: "installation" },
+    { key: "commissioning", labelKey: "commissioning" },
+    { key: "troubleshooting", labelKey: "troubleshooting" },
+    { key: "spec_consultation", labelKey: "spec_consultation" },
+  ]
+
+  const tags: { key: Tag; labelKey: Tag }[] = [
+    { key: "outdoor_unit", labelKey: "outdoor_unit" },
+    { key: "hydrobox", labelKey: "hydrobox" },
+    { key: "remote", labelKey: "remote" },
+    { key: "wiring", labelKey: "wiring" },
+    { key: "heating", labelKey: "heating" },
+    { key: "hot_water", labelKey: "hot_water" },
+    { key: "cooling", labelKey: "cooling" },
+  ]
+
+  const initials = currentUser.displayName
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+
+  const handleNavClick = (key: "all" | "my" | "mentioned") => {
+    setActiveFilter(key)
+    setActiveCategoryFilter(null)
+    setActiveTagFilter(null)
+    setSelectedThread(null)
+    onCloseMobile?.()
+  }
+
+  const handleCategoryClick = (key: Category, isActive: boolean) => {
+    setActiveCategoryFilter(isActive ? null : key)
+    setActiveFilter("all")
+    setActiveTagFilter(null)
+    setSelectedThread(null)
+    onCloseMobile?.()
+  }
+
+  const handleTagClick = (key: Tag, isActive: boolean) => {
+    setActiveTagFilter(isActive ? null : key)
+    setActiveFilter("all")
+    setActiveCategoryFilter(null)
+    setSelectedThread(null)
+    onCloseMobile?.()
+  }
+
+  return (
+    <div className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+      {/* App header - Ecodan-style branding */}
+      <div className="flex items-center justify-between px-4 pt-4 pb-2 sm:pt-5 sm:pb-3">
+        <div className="flex items-center gap-1.5">
+          <span className="text-lg font-bold tracking-tight">
+            <span className="text-[#0091ea]">eco</span>
+            <span className="text-[#e53935]">dan</span>
+          </span>
+          <span className="text-sm font-medium text-muted-foreground">Forum</span>
+        </div>
+        {/* Close button - mobile only */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onCloseMobile}
+          className="size-8 p-0 text-muted-foreground md:hidden"
+          aria-label={tr("close")}
+        >
+          <X className="size-5" />
+        </Button>
+      </div>
+
+      {/* Search */}
+      <div className="px-3 pb-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder={tr("search")}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-10 rounded-xl border-0 bg-sidebar-accent pl-9 text-sm placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring"
+          />
+        </div>
+      </div>
+
+      <Separator className="bg-sidebar-border" />
+
+      <ScrollArea className="flex-1 px-2">
+        {/* Navigation */}
+        <div className="py-2">
+          <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {tr("threads")}
+          </p>
+          <nav className="flex flex-col gap-0.5">
+            {navItems.map((item) => {
+              const Icon = item.icon
+              const isActive = activeFilter === item.key && activeCategoryFilter === null && activeTagFilter === null
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => handleNavClick(item.key)}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                  )}
+                >
+                  <Icon className="size-4 shrink-0" />
+                  {item.label}
+                </button>
+              )
+            })}
+          </nav>
+        </div>
+
+        <Separator className="bg-sidebar-border" />
+
+        {/* Categories */}
+        <div className="py-2">
+          <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {tr("categories")}
+          </p>
+          <nav className="flex flex-col gap-0.5">
+            {categories.map((cat) => {
+              const Icon = categoryIcons[cat.key]
+              const isActive = activeCategoryFilter === cat.key
+              return (
+                <button
+                  key={cat.key}
+                  onClick={() => handleCategoryClick(cat.key, isActive)}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                  )}
+                >
+                  <Icon className="size-4 shrink-0" />
+                  {tr(cat.labelKey)}
+                </button>
+              )
+            })}
+          </nav>
+        </div>
+
+        <Separator className="bg-sidebar-border" />
+
+        {/* Equipment Tags */}
+        <div className="py-2">
+          <p className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {tr("tags")}
+          </p>
+          <nav className="flex flex-col gap-0.5">
+            {tags.map((tag) => {
+              const Icon = tagIcons[tag.key]
+              const isActive = activeTagFilter === tag.key
+              return (
+                <button
+                  key={tag.key}
+                  onClick={() => handleTagClick(tag.key, isActive)}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                  )}
+                >
+                  <Icon className="size-4 shrink-0" />
+                  {tr(tag.labelKey)}
+                </button>
+              )
+            })}
+          </nav>
+        </div>
+      </ScrollArea>
+
+      <Separator className="bg-sidebar-border" />
+
+      {/* User profile + language */}
+      <div className="flex flex-col gap-2 p-3">
+        {/* Language switcher */}
+        <button
+          onClick={() => setLocale(locale === "en" ? "ja" : "en")}
+          className="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        >
+          <span className="flex items-center gap-2">
+            <Globe className="size-4" />
+            Language
+          </span>
+          <span className="text-foreground">{locale === "en" ? "EN" : "JA"}</span>
+        </button>
+
+        {/* User info */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex w-full items-center gap-2.5 rounded-xl p-2.5 text-sm transition-colors hover:bg-sidebar-accent">
+              <div className="relative">
+                <Avatar className="size-8">
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xs font-medium">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-sidebar bg-online" />
+              </div>
+              <div className="flex flex-1 flex-col items-start">
+                <span className="text-sm font-medium leading-none text-sidebar-foreground">
+                  {currentUser.displayName}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  @{currentUser.name}
+                </span>
+              </div>
+              <ChevronDown className="size-4 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" side="top" className="w-48">
+            <DropdownMenuItem>
+              <User className="mr-2 size-4" />
+              {tr("profile")}
+            </DropdownMenuItem>
+            <DropdownMenuItem>
+              <Settings className="mr-2 size-4" />
+              {tr("settings")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-destructive">
+              <LogOut className="mr-2 size-4" />
+              {tr("signOut")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  )
+}

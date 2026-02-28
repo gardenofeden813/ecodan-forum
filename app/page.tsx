@@ -1,0 +1,87 @@
+"use client"
+
+import { useState } from "react"
+import { ForumProvider, useForum } from "@/lib/forum-context"
+import { ForumSidebar } from "@/components/forum-sidebar"
+import { ThreadList } from "@/components/thread-list"
+import { ThreadDetail } from "@/components/thread-detail"
+import { Menu } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
+
+function MobileHeader({ onOpenSidebar }: { onOpenSidebar: () => void }) {
+  const { tr } = useForum()
+
+  return (
+    <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-2.5 md:hidden">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onOpenSidebar}
+        className="size-8 p-0 text-muted-foreground"
+        aria-label="Menu"
+      >
+        <Menu className="size-5" />
+      </Button>
+      <span className="text-sm font-semibold text-foreground tracking-tight">{tr("appName")}</span>
+    </div>
+  )
+}
+
+function ForumLayout() {
+  const { selectedThread } = useForum()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  return (
+    <div className="flex h-dvh w-full flex-col overflow-hidden bg-background md:flex-row">
+      {/* Mobile header - only on small screens */}
+      {!selectedThread && <MobileHeader onOpenSidebar={() => setSidebarOpen(true)} />}
+
+      {/* Sidebar overlay for mobile */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar - drawer on mobile, fixed on md+ */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 w-72 transform transition-transform duration-200 ease-out md:relative md:z-auto md:w-64 md:translate-x-0 md:transition-none lg:w-72",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        <ForumSidebar onCloseMobile={() => setSidebarOpen(false)} />
+      </aside>
+
+      {/* Thread list - visible when no thread selected on mobile, always on md+ */}
+      <div
+        className={cn(
+          "flex-1 md:flex-none md:w-80 lg:w-96",
+          selectedThread ? "hidden md:flex" : "flex"
+        )}
+      >
+        <ThreadList />
+      </div>
+
+      {/* Thread detail - full screen on mobile, flex-1 on md+ */}
+      <div
+        className={cn(
+          "flex-1",
+          selectedThread ? "flex" : "hidden md:flex"
+        )}
+      >
+        <ThreadDetail />
+      </div>
+    </div>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <ForumProvider>
+      <ForumLayout />
+    </ForumProvider>
+  )
+}
