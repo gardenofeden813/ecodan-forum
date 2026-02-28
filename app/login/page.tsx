@@ -26,14 +26,35 @@ export default function LoginPage() {
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
+        // まずサインアップを試みる
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
           options: {
             emailRedirectTo: `${window.location.origin}/auth/callback`,
           },
         })
-        if (error) throw error
+        if (signUpError) throw signUpError
+
+        // セッションがあればそのままログイン済み（Confirm email OFF の場合）
+        if (signUpData.session) {
+          router.push("/")
+          router.refresh()
+          return
+        }
+
+        // セッションがなければ（Confirm email ON）パスワードでログインを試みる
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
+        if (!signInError) {
+          router.push("/")
+          router.refresh()
+          return
+        }
+
+        // どちらも失敗した場合のみメール確認メッセージを表示
         setMessage("確認メールを送信しました。メールをご確認ください。")
       } else {
         const { error } = await supabase.auth.signInWithPassword({
