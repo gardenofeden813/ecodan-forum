@@ -196,10 +196,15 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       const messagesByThread = new Map<string, Message[]>()
       for (const msg of messageRows ?? []) {
         const mentions = parseMentions(msg.content)
+        // attachments is stored as jsonb; ensure it's always an array
+        const attachments: Attachment[] = Array.isArray(msg.attachments)
+          ? msg.attachments
+          : []
         const enriched: Message = {
           ...msg,
           profile: profileMap.get(msg.sender_id) ?? null,
           mentions,
+          attachments,
         }
         if (!messagesByThread.has(msg.thread_id)) {
           messagesByThread.set(msg.thread_id, [])
@@ -316,13 +321,14 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
   // ── addReply ───────────────────────────────────────────────────────────────
   const addReply = useCallback(
-    async (threadId: string, body: string, _attachments?: Attachment[]) => {
+    async (threadId: string, body: string, attachments?: Attachment[]) => {
       if (!currentUser) return
 
       const { error } = await supabase.from("messages").insert({
         thread_id: threadId,
         content: body,
         sender_id: currentUser.id,
+        attachments: attachments && attachments.length > 0 ? attachments : [],
       })
 
       if (error) {

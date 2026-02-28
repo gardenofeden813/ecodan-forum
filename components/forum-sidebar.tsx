@@ -116,11 +116,8 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
     <div className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       {/* App header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2 sm:pt-5 sm:pb-3">
-        <div className="flex items-center gap-1.5">
-          <span className="text-lg font-bold tracking-tight">
-            <span className="text-[#0091ea]">eco</span>
-            <span className="text-[#e53935]">dan</span>
-          </span>
+        <div className="flex items-center gap-2">
+          <img src="/ecodan-logo.svg" alt="ecodan" className="h-7 w-auto" />
           <span className="text-sm font-medium text-muted-foreground">Forum</span>
         </div>
         <Button
@@ -259,48 +256,36 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
           <span className="text-foreground">{locale === "en" ? "EN" : "JA"}</span>
         </button>
 
-        {/* User info */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-2.5 rounded-xl p-2.5 text-sm transition-colors hover:bg-sidebar-accent">
-              <div className="relative">
-                <Avatar className="size-8">
-                  <AvatarFallback className="bg-primary text-primary-foreground text-xs font-medium">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-sidebar bg-green-500" />
-              </div>
-              <div className="flex flex-1 flex-col items-start">
-                <span className="text-sm font-medium leading-none text-sidebar-foreground">
-                  {displayName}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  @{displayName.toLowerCase().replace(/\s+/g, "_")}
-                </span>
-              </div>
-              <ChevronDown className="size-4 text-muted-foreground" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side="top" className="w-48">
-            <DropdownMenuItem>
-              <User className="mr-2 size-4" />
-              {tr("profile")}
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Settings className="mr-2 size-4" />
-              {tr("settings")}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={() => signOut()}
-            >
-              <LogOut className="mr-2 size-4" />
-              {tr("signOut")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* User info row */}
+        <div className="flex items-center gap-2">
+          <div className="flex flex-1 items-center gap-2.5 rounded-xl p-2">
+            <div className="relative shrink-0">
+              <Avatar className="size-8">
+                <AvatarFallback className="bg-primary text-primary-foreground text-xs font-medium">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-sidebar bg-green-500" />
+            </div>
+            <div className="flex flex-1 flex-col items-start min-w-0">
+              <span className="text-sm font-medium leading-none text-sidebar-foreground truncate max-w-full">
+                {displayName}
+              </span>
+              <span className="text-xs text-muted-foreground truncate max-w-full">
+                @{displayName.toLowerCase().replace(/\s+/g, "_")}
+              </span>
+            </div>
+          </div>
+          {/* Sign out button — always visible */}
+          <button
+            onClick={() => signOut()}
+            title="Sign out"
+            className="flex shrink-0 items-center justify-center size-9 rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            aria-label={tr("signOut")}
+          >
+            <LogOut className="size-4" />
+          </button>
+        </div>
       </div>
     </div>
   )
