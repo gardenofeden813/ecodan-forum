@@ -6,6 +6,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react"
 import { type Locale, t, type TranslationKey } from "./i18n"
@@ -122,6 +123,9 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const [allProfiles, setAllProfiles] = useState<Profile[]>([])
 
+  // Use a ref to track the selected thread ID without causing loadThreads to re-create
+  const selectedThreadIdRef = useRef<string | null>(null)
+
   const tr = useCallback(
     (key: TranslationKey, params?: Record<string, string | number>) => t(locale, key, params),
     [locale]
@@ -138,6 +142,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       }
     )
     return () => subscription.unsubscribe()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Ensure profile exists ──────────────────────────────────────────────────
@@ -165,9 +170,11 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   const loadProfiles = useCallback(async () => {
     const { data } = await supabase.from("profiles").select("*")
     if (data) setAllProfiles(data)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Load threads ───────────────────────────────────────────────────────────
+  // NOTE: No dependency on selectedThread state — use ref instead to avoid infinite loop
   const loadThreads = useCallback(async () => {
     setIsLoading(true)
     try {
@@ -245,15 +252,17 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
       setThreads(enrichedThreads)
 
-      // Update selectedThread if it's open
-      if (selectedThread) {
-        const updated = enrichedThreads.find((t) => t.id === selectedThread.id)
+      // Update selectedThread using the ref (no state dependency = no infinite loop)
+      const currentSelectedId = selectedThreadIdRef.current
+      if (currentSelectedId) {
+        const updated = enrichedThreads.find((t) => t.id === currentSelectedId)
         if (updated) setSelectedThread(updated)
       }
     } finally {
       setIsLoading(false)
     }
-  }, [selectedThread?.id])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // ← empty deps: stable reference, uses ref for selectedThread
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -265,6 +274,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       await loadThreads()
     }
     init()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── Realtime subscriptions ─────────────────────────────────────────────────
@@ -283,6 +293,12 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       supabase.removeChannel(channel)
     }
   }, [loadThreads])
+
+  // ── Wrapped setSelectedThread that also updates the ref ────────────────────
+  const setSelectedThreadWithRef = useCallback((thread: Thread | null) => {
+    selectedThreadIdRef.current = thread?.id ?? null
+    setSelectedThread(thread)
+  }, [])
 
   // ── addThread ──────────────────────────────────────────────────────────────
   const addThread = useCallback(
@@ -311,6 +327,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
           thread_id: thread.id,
           content: body,
           sender_id: currentUser.id,
+          attachments: [],
         })
       }
 
@@ -387,17 +404,26 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   // ── signOut ────────────────────────────────────────────────────────────────
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
-    window.location.href = "/login"
+    // Hard redirect to login page
+    if (typeof window !== "undefined") {
+      window.location.replace("/login")
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Filter ─────────────────────────────────────────────────────────────────
+  // ── Filter — full-text search across title, body, all reply messages, and author ──
   const filteredThreads = threads.filter((thread) => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       const matchTitle = thread.title.toLowerCase().includes(q)
       const matchBody = thread.body.toLowerCase().includes(q)
       const matchAuthor = (thread.profile?.full_name ?? "").toLowerCase().includes(q)
-      if (!matchTitle && !matchBody && !matchAuthor) return false
+      // Search inside all reply messages (full conversation search)
+      const matchReplies = thread.messages.some((m) =>
+        m.content.toLowerCase().includes(q) ||
+        (m.profile?.full_name ?? "").toLowerCase().includes(q)
+      )
+      if (!matchTitle && !matchBody && !matchAuthor && !matchReplies) return false
     }
 
     if (activeFilter === "my" && thread.created_by !== currentUser?.id) return false
@@ -425,7 +451,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
         currentProfile,
         threads,
         selectedThread,
-        setSelectedThread,
+        setSelectedThread: setSelectedThreadWithRef,
         searchQuery,
         setSearchQuery,
         activeFilter,
