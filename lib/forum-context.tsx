@@ -35,6 +35,7 @@ export interface Message {
   content: string
   sender_id: string
   created_at: string
+  parent_id?: string | null
   profile?: Profile | null
   mentions: string[]
   attachments?: Attachment[]
@@ -84,7 +85,7 @@ interface ForumContextType {
   activeTagFilter: Tag | null
   setActiveTagFilter: (tag: Tag | null) => void
   addThread: (title: string, body: string, category: Category, tags: Tag[]) => Promise<void>
-  addReply: (threadId: string, body: string, attachments?: Attachment[]) => Promise<void>
+  addReply: (threadId: string, body: string, attachments?: Attachment[], parentId?: string | null) => Promise<void>
   toggleThreadStatus: (threadId: string) => Promise<void>
   filteredThreads: Thread[]
   isLoading: boolean
@@ -125,6 +126,11 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
   // Use a ref to track the selected thread ID without causing loadThreads to re-create
   const selectedThreadIdRef = useRef<string | null>(null)
+  // Ref to the setSelectedThread setter so loadThreads can call it without deps
+  const setSelectedThreadRef = useRef<(t: Thread | null) => void>(setSelectedThread)
+  useEffect(() => {
+    setSelectedThreadRef.current = setSelectedThread
+  })
 
   const tr = useCallback(
     (key: TranslationKey, params?: Record<string, string | number>) => t(locale, key, params),
@@ -174,7 +180,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // ── Load threads ───────────────────────────────────────────────────────────
-  // NOTE: No dependency on selectedThread state — use ref instead to avoid infinite loop
+  // NOTE: No dependency on selectedThread state — use refs instead to avoid infinite loop
   const loadThreads = useCallback(async () => {
     setIsLoading(true)
     try {
@@ -256,13 +262,16 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       const currentSelectedId = selectedThreadIdRef.current
       if (currentSelectedId) {
         const updated = enrichedThreads.find((t) => t.id === currentSelectedId)
-        if (updated) setSelectedThread(updated)
+        if (updated) {
+          // Use the ref to the setter to avoid stale closure issues
+          setSelectedThreadRef.current(updated)
+        }
       }
     } finally {
       setIsLoading(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // ← empty deps: stable reference, uses ref for selectedThread
+  }, []) // ← empty deps: stable reference, uses refs for selectedThread
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -338,7 +347,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
   // ── addReply ───────────────────────────────────────────────────────────────
   const addReply = useCallback(
-    async (threadId: string, body: string, attachments?: Attachment[]) => {
+    async (threadId: string, body: string, attachments?: Attachment[], parentId?: string | null) => {
       if (!currentUser) return
 
       const { error } = await supabase.from("messages").insert({
@@ -346,6 +355,7 @@ export function ForumProvider({ children }: { children: ReactNode }) {
         content: body,
         sender_id: currentUser.id,
         attachments: attachments && attachments.length > 0 ? attachments : [],
+        ...(parentId ? { parent_id: parentId } : {}),
       })
 
       if (error) {
@@ -374,6 +384,14 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       if (error) {
         console.error("Status update error:", error)
         return
+      }
+
+      // Optimistically update selectedThread immediately so UI responds instantly
+      // (loadThreads will also update it, but this prevents the flash of stale state)
+      if (selectedThreadIdRef.current === threadId) {
+        const optimistic: Thread = { ...thread, status: newStatus }
+        // Use setSelectedThreadWithRef to keep selectedThreadIdRef in sync
+        setSelectedThreadWithRef(optimistic)
       }
 
       // If closing → trigger AI summary
@@ -479,6 +497,3 @@ export function useForum() {
   if (!context) throw new Error("useForum must be used within ForumProvider")
   return context
 }
-
-// Re-export helpers so existing components still compile
-export { getCategoryColor, getTagColor }

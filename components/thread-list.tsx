@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, MessageSquare, CheckCircle2, CircleDot, Loader2 } from "lucide-react"
+import { Plus, MessageSquare, CheckCircle2, CircleDot, Loader2, Search, X } from "lucide-react"
+import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,7 +26,7 @@ function getTimeAgoFromString(dateStr: string): string {
 }
 
 export function ThreadList() {
-  const { tr, filteredThreads, selectedThread, setSelectedThread, isLoading } = useForum()
+  const { tr, filteredThreads, selectedThread, setSelectedThread, isLoading, searchQuery, setSearchQuery } = useForum()
   const [showNewThread, setShowNewThread] = useState(false)
 
   return (
@@ -41,6 +42,29 @@ export function ThreadList() {
           <Plus className="size-3.5" />
           <span className="hidden xs:inline sm:inline">{tr("newThread")}</span>
         </Button>
+      </div>
+
+      {/* Search bar — always visible in thread list for easy access */}
+      <div className="border-b border-border px-3 py-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder="Search threads & messages..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-9 rounded-xl border-border bg-muted pl-9 pr-8 text-sm placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-primary"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Thread list */}

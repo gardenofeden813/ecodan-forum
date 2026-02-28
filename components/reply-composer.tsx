@@ -1,16 +1,21 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { ImagePlus, Mic, MicOff, X, Send, Play, Pause, Square, Loader2 } from "lucide-react"
+import { ImagePlus, Mic, MicOff, X, Send, Play, Pause, Square, Loader2, CornerDownLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { MentionTextarea } from "@/components/mention-textarea"
 import { useForum } from "@/lib/forum-context"
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder"
 import type { Attachment } from "@/lib/forum-data"
+import type { Message } from "@/lib/forum-context"
 import { cn } from "@/lib/utils"
 
 interface ReplyComposerProps {
   threadId: string
+  isClosed?: boolean
+  replyingTo?: Message | null
+  onReplySent?: () => void
+  onCancelReply?: () => void
 }
 
 // Upload a file to Supabase Storage via the /api/upload endpoint
@@ -28,14 +33,20 @@ async function uploadToStorage(file: File | Blob, filename: string): Promise<str
   return data.url as string
 }
 
-export function ReplyComposer({ threadId }: ReplyComposerProps) {
+export function ReplyComposer({
+  threadId,
+  isClosed = false,
+  replyingTo = null,
+  onReplySent,
+  onCancelReply,
+}: ReplyComposerProps) {
   const { tr, addReply } = useForum()
   const [replyText, setReplyText] = useState("")
   const [images, setImages] = useState<{ id: string; url: string; name: string; file: File }[]>([])
   const [voiceAttachment, setVoiceAttachment] = useState<{ url: string; duration: number; blob?: Blob } | null>(null)
+  const [isPosting, setIsPosting] = useState(false)
   const [isPlayingVoice, setIsPlayingVoice] = useState(false)
   const [currentPlayTime, setCurrentPlayTime] = useState(0)
-  const [isPosting, setIsPosting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
 
@@ -49,55 +60,58 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
     clearRecording,
   } = useVoiceRecorder()
 
-  // Update playback time
+  // When audioUrl/audioBlob become available after stopRecording, auto-set voiceAttachment
+  useEffect(() => {
+    if (audioUrl && audioBlob && !isRecording && !voiceAttachment) {
+      setVoiceAttachment({ url: audioUrl, duration, blob: audioBlob })
+    }
+  }, [audioUrl, audioBlob, isRecording, duration]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync audio playback time
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-    const updateTime = () => setCurrentPlayTime(audio.currentTime)
-    audio.addEventListener("timeupdate", updateTime)
-    return () => audio.removeEventListener("timeupdate", updateTime)
-  }, [voiceAttachment])
+    const update = () => setCurrentPlayTime(audio.currentTime)
+    audio.addEventListener("timeupdate", update)
+    return () => audio.removeEventListener("timeupdate", update)
+  }, [])
 
   const handleStopRecording = useCallback(() => {
     stopRecording()
+    // voiceAttachment will be set by the useEffect above when audioUrl/audioBlob are ready
   }, [stopRecording])
 
-  // Accept recording into attachments
   const handleAcceptRecording = useCallback(() => {
-    if (audioUrl) {
-      setVoiceAttachment({ url: audioUrl, duration, blob: audioBlob ?? undefined })
-      clearRecording()
-    }
-  }, [audioUrl, duration, audioBlob, clearRecording])
+    if (!audioUrl) return
+    setVoiceAttachment({ url: audioUrl, duration, blob: audioBlob ?? undefined })
+  }, [audioUrl, duration, audioBlob])
 
   const handleDiscardRecording = useCallback(() => {
-    clearRecording()
     setVoiceAttachment(null)
-    setCurrentPlayTime(0)
+    clearRecording()
     setIsPlayingVoice(false)
+    setCurrentPlayTime(0)
   }, [clearRecording])
 
-  // Image picker
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files) return
-    const newImages = Array.from(files).slice(0, 4 - images.length).map((file) => ({
-      id: `img-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      url: URL.createObjectURL(file),
-      name: file.name,
-      file,
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    const newImages = files.slice(0, 4 - images.length).map((f) => ({
+      id: `${Date.now()}-${Math.random()}`,
+      url: URL.createObjectURL(f),
+      name: f.name,
+      file: f,
     }))
-    setImages((prev) => [...prev, ...newImages].slice(0, 4))
-    if (fileInputRef.current) fileInputRef.current.value = ""
-  }
+    setImages((prev) => [...prev, ...newImages])
+    e.target.value = ""
+  }, [images.length])
 
-  const removeImage = (id: string) => {
+  const removeImage = useCallback((id: string) => {
     setImages((prev) => {
       const img = prev.find((i) => i.id === id)
       if (img) URL.revokeObjectURL(img.url)
       return prev.filter((i) => i.id !== id)
     })
-  }
+  }, [])
 
   // Play/pause voice preview
   const toggleVoicePlayback = () => {
@@ -133,7 +147,6 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
           })
         } catch (err) {
           console.error("Image upload failed:", err)
-          // Fall back to blob URL so the message still posts
           attachments.push({ id: img.id, type: "image", url: img.url, name: img.name })
         }
       }
@@ -163,7 +176,17 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
         }
       }
 
-      await addReply(threadId, replyText.trim(), attachments.length > 0 ? attachments : undefined)
+      // Prepend mention if replying to someone
+      let finalText = replyText.trim()
+      if (replyingTo) {
+        const name = replyingTo.profile?.full_name ?? "Unknown"
+        const mention = `@${name.replace(/\s+/g, "_")}`
+        if (!finalText.startsWith(mention)) {
+          finalText = `${mention} ${finalText}`
+        }
+      }
+
+      await addReply(threadId, finalText, attachments.length > 0 ? attachments : undefined, replyingTo?.id ?? null)
 
       // Reset state
       setReplyText("")
@@ -173,6 +196,7 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
       setCurrentPlayTime(0)
       setIsPlayingVoice(false)
       clearRecording()
+      onReplySent?.()
     } finally {
       setIsPosting(false)
     }
@@ -188,8 +212,38 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
       ? (currentPlayTime / voiceAttachment.duration) * 100
       : 0
 
+  // When thread is closed, show a banner but still allow posting after reopen
+  if (isClosed) {
+    return (
+      <div className="border-t border-border bg-card px-4 py-3 sm:px-6">
+        <p className="text-center text-xs text-muted-foreground">
+          This thread is marked as resolved.{" "}
+          <span className="text-foreground font-medium">Reopen it</span> to post a reply.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="border-t border-border bg-card px-3 py-3 sm:px-6 sm:py-4">
+      {/* Replying-to indicator */}
+      {replyingTo && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-1.5">
+          <CornerDownLeft className="size-3.5 shrink-0 text-primary" />
+          <span className="flex-1 truncate text-xs text-foreground">
+            Replying to{" "}
+            <span className="font-semibold">{replyingTo.profile?.full_name ?? "Unknown"}</span>
+          </span>
+          <button
+            onClick={onCancelReply}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label="Cancel reply"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Image previews */}
       {images.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-2">
@@ -308,7 +362,9 @@ export function ReplyComposer({ threadId }: ReplyComposerProps) {
       {/* Main input area */}
       <div className="flex flex-col gap-2">
         <MentionTextarea
-          placeholder={tr("replyPlaceholder")}
+          placeholder={replyingTo
+            ? `Reply to ${replyingTo.profile?.full_name ?? "Unknown"}...`
+            : tr("replyPlaceholder")}
           value={replyText}
           onChange={setReplyText}
           rows={2}

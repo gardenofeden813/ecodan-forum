@@ -113,7 +113,7 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
   }
 
   return (
-    <div className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <div className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground overflow-hidden">
       {/* App header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2 sm:pt-5 sm:pb-3">
         <div className="flex items-center gap-2">
@@ -139,7 +139,14 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
             type="text"
             placeholder={tr("search")}
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value)
+              // On mobile, close the sidebar and show thread list when searching
+              if (e.target.value) {
+                setSelectedThread(null)
+                onCloseMobile?.()
+              }
+            }}
             className="h-10 rounded-xl border-0 bg-sidebar-accent pl-9 text-sm placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring"
           />
         </div>

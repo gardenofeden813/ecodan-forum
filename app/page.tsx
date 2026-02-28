@@ -9,33 +9,25 @@ import { Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-function MobileHeader({ onOpenSidebar }: { onOpenSidebar: () => void }) {
-  const { tr } = useForum()
-
-  return (
-    <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-2.5 md:hidden">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onOpenSidebar}
-        className="size-8 p-0 text-muted-foreground"
-        aria-label="Menu"
-      >
-        <Menu className="size-5" />
-      </Button>
-      <span className="text-sm font-semibold text-foreground tracking-tight">{tr("appName")}</span>
-    </div>
-  )
-}
-
 function ForumLayout() {
-  const { selectedThread } = useForum()
+  const { selectedThread, tr } = useForum()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background md:flex-row">
-      {/* Mobile header - only on small screens */}
-      {!selectedThread && <MobileHeader onOpenSidebar={() => setSidebarOpen(true)} />}
+      {/* Mobile header - always shown on small screens */}
+      <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-2.5 md:hidden">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setSidebarOpen(true)}
+          className="size-8 p-0 text-muted-foreground"
+          aria-label="Menu"
+        >
+          <Menu className="size-5" />
+        </Button>
+        <span className="text-sm font-semibold text-foreground tracking-tight">{tr("appName")}</span>
+      </div>
 
       {/* Sidebar overlay for mobile */}
       {sidebarOpen && (
@@ -55,24 +47,27 @@ function ForumLayout() {
         <ForumSidebar onCloseMobile={() => setSidebarOpen(false)} />
       </aside>
 
-      {/* Thread list - visible when no thread selected on mobile, always on md+ */}
-      <div
-        className={cn(
-          "flex-1 md:flex-none md:w-80 lg:w-96",
-          selectedThread ? "hidden md:flex" : "flex"
-        )}
-      >
-        <ThreadList />
-      </div>
+      {/* Main content area */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Thread list - visible when no thread selected on mobile, always on md+ */}
+        <div
+          className={cn(
+            "w-full md:flex-none md:w-80 lg:w-96",
+            selectedThread ? "hidden md:flex" : "flex"
+          )}
+        >
+          <ThreadList />
+        </div>
 
-      {/* Thread detail - full screen on mobile, flex-1 on md+ */}
-      <div
-        className={cn(
-          "flex-1",
-          selectedThread ? "flex" : "hidden md:flex"
-        )}
-      >
-        <ThreadDetail />
+        {/* Thread detail - full screen on mobile when thread selected, flex-1 on md+ */}
+        <div
+          className={cn(
+            "flex-1",
+            selectedThread ? "flex" : "hidden md:flex"
+          )}
+        >
+          <ThreadDetail />
+        </div>
       </div>
     </div>
   )

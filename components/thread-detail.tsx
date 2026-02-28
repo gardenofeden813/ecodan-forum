@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import { ArrowLeft, MessageSquare, Play, Pause, CheckCircle2, CircleDot, BookOpen } from "lucide-react"
+import { useState, useRef, useEffect, useCallback } from "react"
+import { ArrowLeft, MessageSquare, Play, Pause, CheckCircle2, CircleDot, BookOpen, X, CornerDownLeft } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,6 +26,37 @@ function getTimeAgoFromString(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return `${days}d ago`
+}
+
+// Image lightbox modal
+function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div className="relative max-h-[92vh] max-w-[92vw]" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={onClose}
+          className="absolute -right-3 -top-3 z-10 flex size-7 items-center justify-center rounded-full bg-white text-black shadow-lg"
+          aria-label="Close"
+        >
+          <X className="size-4" />
+        </button>
+        <img
+          src={src}
+          alt={alt}
+          className="max-h-[88vh] max-w-[88vw] rounded-xl object-contain shadow-2xl"
+        />
+      </div>
+    </div>
+  )
 }
 
 function VoicePlayer({ attachment }: { attachment: Attachment }) {
@@ -87,20 +118,45 @@ function VoicePlayer({ attachment }: { attachment: Attachment }) {
 }
 
 function AttachmentDisplay({ attachments }: { attachments: Attachment[] }) {
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
   const images = attachments.filter((a) => a.type === "image")
   const voices = attachments.filter((a) => a.type === "voice")
   return (
-    <div className="mt-2 flex flex-col gap-2">
-      {images.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {images.map((img) => (
-            <img key={img.id} src={img.url} alt={img.name}
-              className="max-h-48 rounded-xl border border-border object-cover sm:max-h-60" />
-          ))}
-        </div>
+    <>
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          onClose={() => setLightbox(null)}
+        />
       )}
-      {voices.map((v) => <VoicePlayer key={v.id} attachment={v} />)}
-    </div>
+      <div className="mt-2 flex flex-col gap-2">
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {images.map((img) => (
+              <button
+                key={img.id}
+                onClick={() => setLightbox({ src: img.url, alt: img.name })}
+                className="group relative overflow-hidden rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-primary"
+                aria-label={`View ${img.name}`}
+              >
+                <img
+                  src={img.url}
+                  alt={img.name}
+                  className="size-20 object-cover transition-transform group-hover:scale-105 sm:size-24"
+                />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/25">
+                  <span className="text-[10px] font-semibold text-white opacity-0 drop-shadow group-hover:opacity-100">
+                    Tap to expand
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        {voices.map((v) => <VoicePlayer key={v.id} attachment={v} />)}
+      </div>
+    </>
   )
 }
 
@@ -118,43 +174,131 @@ function TranslatableText({ text, className }: { text: string; className?: strin
   )
 }
 
-function ReplyCard({ message }: { message: Message }) {
+// ─── Reddit-style nested reply card ─────────────────────────────────────────
+
+interface ReplyCardProps {
+  message: Message
+  allMessages: Message[]
+  depth: number
+  replyingToId: string | null
+  onReplyTo: (msg: Message) => void
+  isClosed: boolean
+}
+
+function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClosed }: ReplyCardProps) {
   const { tr } = useForum()
   const [translatedText, setTranslatedText] = useState<string | null>(null)
   const timeStr = getTimeAgoFromString(message.created_at)
   const displayName = message.profile?.full_name ?? "Unknown"
   const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
   const displayText = translatedText || message.content
+  const isBeingRepliedTo = replyingToId === message.id
+
+  // Find direct children of this message
+  const children = allMessages.filter((m) => m.parent_id === message.id)
+
+  // Max nesting depth to avoid excessive indentation on mobile
+  const maxDepth = 4
+  const indentClass = depth > 0 ? "ml-3 sm:ml-5" : ""
 
   return (
-    <div className="flex gap-2.5 rounded-xl border border-border bg-card p-3 sm:gap-3 sm:p-4">
-      <div className="relative shrink-0">
-        <Avatar className="size-7 sm:size-8">
-          <AvatarFallback className="bg-muted text-muted-foreground text-[10px] sm:text-xs font-medium">
-            {initials}
-          </AvatarFallback>
-        </Avatar>
-      </div>
-      <div className="flex flex-1 flex-col gap-1 sm:gap-1.5">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-foreground sm:text-sm">{displayName}</span>
-          <span className="text-[10px] text-muted-foreground sm:text-[11px]">{timeStr}</span>
+    <div className={cn("flex flex-col gap-0", indentClass)}>
+      {/* Thread line for nested replies */}
+      {depth > 0 && (
+        <div className="flex gap-0">
+          <div className="w-px bg-border shrink-0 ml-3.5 mr-3" />
         </div>
-        <div className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap sm:text-sm">
-          <MentionText text={displayText} />
+      )}
+      <div className={cn(
+        "flex gap-2.5 rounded-xl border bg-card p-3 sm:gap-3 sm:p-4 transition-colors",
+        isBeingRepliedTo ? "border-primary/40 bg-primary/5" : "border-border"
+      )}>
+        <div className="relative shrink-0">
+          <Avatar className="size-7 sm:size-8">
+            <AvatarFallback className="bg-muted text-muted-foreground text-[10px] sm:text-xs font-medium">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
         </div>
-        {message.attachments && message.attachments.length > 0 && (
-          <AttachmentDisplay attachments={message.attachments} />
-        )}
-        <TranslateButton text={message.content} onTranslated={setTranslatedText}
-          isTranslated={!!translatedText} className="mt-1 text-[10px] sm:text-xs" />
+        <div className="flex flex-1 flex-col gap-1 sm:gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-foreground sm:text-sm">{displayName}</span>
+            <span className="text-[10px] text-muted-foreground sm:text-[11px]">{timeStr}</span>
+          </div>
+          <div className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap sm:text-sm">
+            <MentionText text={displayText} />
+          </div>
+          {message.attachments && message.attachments.length > 0 && (
+            <AttachmentDisplay attachments={message.attachments} />
+          )}
+          <div className="mt-1 flex items-center gap-3">
+            <TranslateButton text={message.content} onTranslated={setTranslatedText}
+              isTranslated={!!translatedText} className="text-[10px] sm:text-xs" />
+            {!isClosed && (
+              <button
+                onClick={() => onReplyTo(message)}
+                className={cn(
+                  "flex items-center gap-1 text-[10px] sm:text-xs font-medium transition-colors",
+                  isBeingRepliedTo
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <CornerDownLeft className="size-3" />
+                {isBeingRepliedTo ? tr("replyingTo") : tr("reply")}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Render children recursively */}
+      {children.length > 0 && depth < maxDepth && (
+        <div className="mt-2 flex flex-col gap-2 pl-4 border-l-2 border-border/50">
+          {children.map((child) => (
+            <ReplyCard
+              key={child.id}
+              message={child}
+              allMessages={allMessages}
+              depth={depth + 1}
+              replyingToId={replyingToId}
+              onReplyTo={onReplyTo}
+              isClosed={isClosed}
+            />
+          ))}
+        </div>
+      )}
+      {/* If max depth reached but still has children, render them flat */}
+      {children.length > 0 && depth >= maxDepth && (
+        <div className="mt-2 flex flex-col gap-2">
+          {children.map((child) => (
+            <ReplyCard
+              key={child.id}
+              message={child}
+              allMessages={allMessages}
+              depth={depth}
+              replyingToId={replyingToId}
+              onReplyTo={onReplyTo}
+              isClosed={isClosed}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
 export function ThreadDetail() {
   const { tr, selectedThread, setSelectedThread, toggleThreadStatus } = useForum()
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null)
+
+  const handleReplyTo = useCallback((msg: Message) => {
+    setReplyingTo((prev) => (prev?.id === msg.id ? null : msg))
+  }, [])
+
+  const handleReplySent = useCallback(() => {
+    setReplyingTo(null)
+  }, [])
 
   if (!selectedThread) {
     return (
@@ -173,17 +317,19 @@ export function ThreadDetail() {
   const authorInitials = authorDisplayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
   const isClosed = thread.status === "closed"
 
-  // replies = messages excluding the first (body) message
-  const replies = thread.messages.slice(1)
-  const replyCount = replies.length
+  // All messages except the first (body) message
+  const allReplies = thread.messages.slice(1)
+  // Top-level replies: those without a parent_id (or parent_id is null/undefined)
+  const topLevelReplies = allReplies.filter((m) => !m.parent_id)
+  const replyCount = allReplies.length
 
   return (
-    <div className="flex flex-1 flex-col bg-background">
+    <div className="flex flex-1 flex-col bg-background overflow-hidden">
       {/* Thread header */}
       <div className="flex items-start gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4">
         <button
           onClick={() => setSelectedThread(null)}
-          className="mt-0.5 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
+          className="mt-0.5 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
           aria-label={tr("back")}
         >
           <ArrowLeft className="size-5" />
@@ -312,14 +458,22 @@ export function ThreadDetail() {
             </>
           )}
 
-          {/* Replies */}
+          {/* Replies — Reddit-style nested */}
           <div className="flex flex-col gap-1">
             <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {replyCount > 0 ? `${replyCount} ${tr("replies")}` : tr("noReplies")}
             </h3>
             <div className="mt-3 flex flex-col gap-3 sm:gap-4">
-              {replies.map((msg) => (
-                <ReplyCard key={msg.id} message={msg} />
+              {topLevelReplies.map((msg) => (
+                <ReplyCard
+                  key={msg.id}
+                  message={msg}
+                  allMessages={allReplies}
+                  depth={0}
+                  replyingToId={replyingTo?.id ?? null}
+                  onReplyTo={handleReplyTo}
+                  isClosed={isClosed}
+                />
               ))}
             </div>
           </div>
@@ -327,7 +481,13 @@ export function ThreadDetail() {
       </ScrollArea>
 
       {/* Reply composer */}
-      <ReplyComposer threadId={thread.id} />
+      <ReplyComposer
+        threadId={thread.id}
+        isClosed={isClosed}
+        replyingTo={replyingTo}
+        onReplySent={handleReplySent}
+        onCancelReply={() => setReplyingTo(null)}
+      />
     </div>
   )
 }
