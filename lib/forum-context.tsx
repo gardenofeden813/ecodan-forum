@@ -312,7 +312,12 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   // ── addThread ──────────────────────────────────────────────────────────────
   const addThread = useCallback(
     async (title: string, body: string, category: Category, _tags: Tag[]) => {
-      if (!currentUser) return
+      // Always get the latest user from supabase to avoid stale closure issues
+      const { data: { user } } = await supabase.auth.getUser()
+      const uid = user?.id ?? currentUser?.id
+      if (!uid) {
+        throw new Error("Not authenticated")
+      }
 
       const { data: thread, error: threadError } = await supabase
         .from("threads")
@@ -320,14 +325,14 @@ export function ForumProvider({ children }: { children: ReactNode }) {
           title,
           category,
           status: "open",
-          created_by: currentUser.id,
+          created_by: uid,
         })
         .select()
         .single()
 
       if (threadError || !thread) {
         console.error("Thread insert error:", threadError)
-        return
+        throw new Error(threadError?.message ?? "Failed to create thread")
       }
 
       // Insert first message as body
@@ -335,11 +340,12 @@ export function ForumProvider({ children }: { children: ReactNode }) {
         const { error: msgError } = await supabase.from("messages").insert({
           thread_id: thread.id,
           content: body,
-          sender_id: currentUser.id,
+          sender_id: uid,
           attachments: [],
         })
         if (msgError) {
           console.error("Message insert error:", msgError)
+          // Don't throw here — thread was created, just the body message failed
         }
       }
 

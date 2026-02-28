@@ -34,10 +34,12 @@ export function NewThreadDialog({ open, onOpenChange }: NewThreadDialogProps) {
   }
 
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const handleSubmit = async () => {
     if (!title.trim() || !body.trim() || isSubmitting) return
     setIsSubmitting(true)
+    setSubmitError(null)
     try {
       await addThread(title.trim(), body.trim(), category, selectedTags)
       setTitle("")
@@ -45,6 +47,9 @@ export function NewThreadDialog({ open, onOpenChange }: NewThreadDialogProps) {
       setCategory("installation")
       setSelectedTags([])
       onOpenChange(false)
+    } catch (err) {
+      console.error("Failed to create thread:", err)
+      setSubmitError(err instanceof Error ? err.message : "Failed to create thread. Please try again.")
     } finally {
       setIsSubmitting(false)
     }
@@ -126,6 +131,10 @@ export function NewThreadDialog({ open, onOpenChange }: NewThreadDialogProps) {
               rows={4}
             />
           </div>
+
+          {submitError && (
+            <p className="text-sm text-destructive rounded-lg bg-destructive/10 px-3 py-2">{submitError}</p>
+          )}
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto rounded-xl">
