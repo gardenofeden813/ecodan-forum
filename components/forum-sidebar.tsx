@@ -1,14 +1,20 @@
 "use client"
 
-import { Search, MessageSquare, User, AtSign, Wrench, PlayCircle, AlertTriangle, FileQuestion, Box, Thermometer, Droplets, Snowflake, Cable, Tv2, Globe, ChevronDown, LogOut, Settings, X } from "lucide-react"
+import {
+  Search, MessageSquare, User, AtSign, Wrench, PlayCircle,
+  AlertTriangle, FileQuestion, Box, Thermometer, Droplets,
+  Snowflake, Cable, Tv2, Globe, ChevronDown, LogOut, Settings, X,
+} from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { useForum } from "@/lib/forum-context"
-import { currentUser } from "@/lib/forum-data"
 import type { Category, Tag } from "@/lib/forum-data"
 import { cn } from "@/lib/utils"
 
@@ -47,6 +53,8 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
     activeTagFilter,
     setActiveTagFilter,
     setSelectedThread,
+    currentProfile,
+    signOut,
   } = useForum()
 
   const navItems = [
@@ -72,10 +80,13 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
     { key: "cooling", labelKey: "cooling" },
   ]
 
-  const initials = currentUser.displayName
+  const displayName = currentProfile?.full_name ?? "User"
+  const initials = displayName
     .split(" ")
-    .map((n) => n[0])
+    .map((n: string) => n[0])
     .join("")
+    .toUpperCase()
+    .slice(0, 2)
 
   const handleNavClick = (key: "all" | "my" | "mentioned") => {
     setActiveFilter(key)
@@ -103,7 +114,7 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
 
   return (
     <div className="flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-      {/* App header - Ecodan-style branding */}
+      {/* App header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2 sm:pt-5 sm:pb-3">
         <div className="flex items-center gap-1.5">
           <span className="text-lg font-bold tracking-tight">
@@ -112,7 +123,6 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
           </span>
           <span className="text-sm font-medium text-muted-foreground">Forum</span>
         </div>
-        {/* Close button - mobile only */}
         <Button
           variant="ghost"
           size="sm"
@@ -149,7 +159,10 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
           <nav className="flex flex-col gap-0.5">
             {navItems.map((item) => {
               const Icon = item.icon
-              const isActive = activeFilter === item.key && activeCategoryFilter === null && activeTagFilter === null
+              const isActive =
+                activeFilter === item.key &&
+                activeCategoryFilter === null &&
+                activeTagFilter === null
               return (
                 <button
                   key={item.key}
@@ -256,14 +269,14 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
                     {initials}
                   </AvatarFallback>
                 </Avatar>
-                <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-sidebar bg-online" />
+                <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-sidebar bg-green-500" />
               </div>
               <div className="flex flex-1 flex-col items-start">
                 <span className="text-sm font-medium leading-none text-sidebar-foreground">
-                  {currentUser.displayName}
+                  {displayName}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  @{currentUser.name}
+                  @{displayName.toLowerCase().replace(/\s+/g, "_")}
                 </span>
               </div>
               <ChevronDown className="size-4 text-muted-foreground" />
@@ -279,7 +292,10 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
               {tr("settings")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">
+            <DropdownMenuItem
+              className="text-destructive"
+              onClick={() => signOut()}
+            >
               <LogOut className="mr-2 size-4" />
               {tr("signOut")}
             </DropdownMenuItem>

@@ -1,18 +1,31 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, MessageSquare, CheckCircle2, CircleDot } from "lucide-react"
+import { Plus, MessageSquare, CheckCircle2, CircleDot, Loader2 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useForum } from "@/lib/forum-context"
-import { getTimeAgo, getCategoryColor, getTagColor } from "@/lib/forum-data"
+import { getCategoryColor, getTagColor } from "@/lib/forum-data"
 import { cn } from "@/lib/utils"
 import { NewThreadDialog } from "@/components/new-thread-dialog"
+import type { Thread } from "@/lib/forum-context"
+
+function getTimeAgoFromString(dateStr: string): string {
+  const date = new Date(dateStr)
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (seconds < 60) return "Just now"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
 
 export function ThreadList() {
-  const { tr, filteredThreads, selectedThread, setSelectedThread } = useForum()
+  const { tr, filteredThreads, selectedThread, setSelectedThread, isLoading } = useForum()
   const [showNewThread, setShowNewThread] = useState(false)
 
   return (
@@ -32,7 +45,11 @@ export function ThreadList() {
 
       {/* Thread list */}
       <ScrollArea className="flex-1">
-        {filteredThreads.length === 0 ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : filteredThreads.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center">
             <div className="flex size-14 items-center justify-center rounded-2xl bg-muted">
               <MessageSquare className="size-6 text-muted-foreground" />
@@ -42,15 +59,19 @@ export function ThreadList() {
           </div>
         ) : (
           <div className="flex flex-col">
-            {filteredThreads.map((thread) => {
-              const time = getTimeAgo(thread.createdAt)
-              const timeStr = time.n !== undefined ? tr(time.key, { n: time.n }) : tr(time.key)
-              const initials = thread.author.displayName
+            {filteredThreads.map((thread: Thread) => {
+              const timeStr = getTimeAgoFromString(thread.created_at)
+              const displayName = thread.profile?.full_name ?? "Unknown"
+              const initials = displayName
                 .split(" ")
-                .map((n) => n[0])
+                .map((n: string) => n[0])
                 .join("")
+                .toUpperCase()
+                .slice(0, 2)
               const isSelected = selectedThread?.id === thread.id
               const isClosed = thread.status === "closed"
+              // replies = messages excluding the first (body) message
+              const replyCount = Math.max(0, thread.messages.length - 1)
 
               return (
                 <button
@@ -58,14 +79,11 @@ export function ThreadList() {
                   onClick={() => setSelectedThread(thread)}
                   className={cn(
                     "flex flex-col gap-1.5 border-b border-border px-3 py-3 text-left transition-colors sm:gap-2 sm:px-4",
-                    isSelected
-                      ? "bg-secondary"
-                      : "hover:bg-muted/50"
+                    isSelected ? "bg-secondary" : "hover:bg-muted/50"
                   )}
                 >
                   {/* Status + Category + time */}
                   <div className="flex items-center gap-1.5">
-                    {/* Status indicator - eco blue for resolved, dan red for open */}
                     {isClosed ? (
                       <CheckCircle2 className="size-4 shrink-0 text-[#0091ea]" />
                     ) : (
@@ -81,10 +99,12 @@ export function ThreadList() {
                   </div>
 
                   {/* Title */}
-                  <h3 className={cn(
-                    "text-sm font-medium leading-snug line-clamp-2",
-                    isClosed ? "text-muted-foreground" : "text-foreground"
-                  )}>
+                  <h3
+                    className={cn(
+                      "text-sm font-medium leading-snug line-clamp-2",
+                      isClosed ? "text-muted-foreground" : "text-foreground"
+                    )}
+                  >
                     {thread.title}
                   </h3>
 
@@ -111,14 +131,12 @@ export function ThreadList() {
                           {initials}
                         </AvatarFallback>
                       </Avatar>
-                      <span className="text-xs text-muted-foreground">
-                        {thread.author.displayName}
-                      </span>
+                      <span className="text-xs text-muted-foreground">{displayName}</span>
                     </div>
-                    {thread.replies.length > 0 && (
+                    {replyCount > 0 && (
                       <div className="flex items-center gap-1 text-xs text-muted-foreground">
                         <MessageSquare className="size-3" />
-                        <span>{thread.replies.length}</span>
+                        <span>{replyCount}</span>
                       </div>
                     )}
                   </div>

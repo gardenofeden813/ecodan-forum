@@ -1,19 +1,32 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { ArrowLeft, MessageSquare, Play, Pause, CheckCircle2, CircleDot } from "lucide-react"
+import { ArrowLeft, MessageSquare, Play, Pause, CheckCircle2, CircleDot, BookOpen } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { useForum } from "@/lib/forum-context"
-import { getTimeAgo, getCategoryColor, getTagColor } from "@/lib/forum-data"
+import { getCategoryColor, getTagColor } from "@/lib/forum-data"
 import type { Attachment } from "@/lib/forum-data"
+import type { Message } from "@/lib/forum-context"
 import { MentionText } from "@/components/mention-text"
 import { ReplyComposer } from "@/components/reply-composer"
 import { TranslateButton } from "@/components/translate-button"
 import { cn } from "@/lib/utils"
+
+function getTimeAgoFromString(dateStr: string): string {
+  const date = new Date(dateStr)
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (seconds < 60) return "Just now"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
 
 function VoicePlayer({ attachment }: { attachment: Attachment }) {
   const { tr } = useForum()
@@ -28,13 +41,8 @@ function VoicePlayer({ attachment }: { attachment: Attachment }) {
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-
     const updateTime = () => setCurrentTime(audio.currentTime)
-    const handleEnded = () => {
-      setIsPlaying(false)
-      setCurrentTime(0)
-    }
-
+    const handleEnded = () => { setIsPlaying(false); setCurrentTime(0) }
     audio.addEventListener("timeupdate", updateTime)
     audio.addEventListener("ended", handleEnded)
     return () => {
@@ -46,24 +54,17 @@ function VoicePlayer({ attachment }: { attachment: Attachment }) {
   const toggle = () => {
     const audio = audioRef.current
     if (!audio) return
-    if (isPlaying) {
-      audio.pause()
-      setIsPlaying(false)
-    } else {
-      audio.play()
-      setIsPlaying(true)
-    }
+    if (isPlaying) { audio.pause(); setIsPlaying(false) }
+    else { audio.play(); setIsPlaying(true) }
   }
 
-  const formatTime = (s: number) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`
+  const formatTime = (s: number) =>
+    `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`
 
   return (
     <div className="overflow-hidden rounded-xl border border-primary/15 bg-primary/5">
       <div className="h-1 w-full bg-primary/10">
-        <div 
-          className="h-full bg-primary transition-all duration-100"
-          style={{ width: `${progressPercent}%` }}
-        />
+        <div className="h-full bg-primary transition-all duration-100" style={{ width: `${progressPercent}%` }} />
       </div>
       <div className="flex items-center gap-2.5 px-3 py-2">
         <button
@@ -76,10 +77,7 @@ function VoicePlayer({ attachment }: { attachment: Attachment }) {
         <div className="flex flex-col">
           <span className="text-xs font-medium text-foreground">{tr("voiceMessage")}</span>
           <span className="text-[11px] tabular-nums text-muted-foreground">
-            {isPlaying 
-              ? tr("remainingTime", { n: Math.ceil(remainingTime) })
-              : formatTime(totalDuration)
-            }
+            {isPlaying ? tr("remainingTime", { n: Math.ceil(remainingTime) }) : formatTime(totalDuration)}
           </span>
         </div>
       </div>
@@ -91,98 +89,65 @@ function VoicePlayer({ attachment }: { attachment: Attachment }) {
 function AttachmentDisplay({ attachments }: { attachments: Attachment[] }) {
   const images = attachments.filter((a) => a.type === "image")
   const voices = attachments.filter((a) => a.type === "voice")
-
   return (
     <div className="mt-2 flex flex-col gap-2">
       {images.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {images.map((img) => (
-            <img
-              key={img.id}
-              src={img.url}
-              alt={img.name}
-              className="max-h-48 rounded-xl border border-border object-cover sm:max-h-60"
-            />
+            <img key={img.id} src={img.url} alt={img.name}
+              className="max-h-48 rounded-xl border border-border object-cover sm:max-h-60" />
           ))}
         </div>
       )}
-      {voices.map((v) => (
-        <VoicePlayer key={v.id} attachment={v} />
-      ))}
+      {voices.map((v) => <VoicePlayer key={v.id} attachment={v} />)}
     </div>
   )
 }
 
-// Translatable text component
-function TranslatableText({ 
-  text, 
-  className 
-}: { 
-  text: string
-  className?: string 
-}) {
+function TranslatableText({ text, className }: { text: string; className?: string }) {
   const [translatedText, setTranslatedText] = useState<string | null>(null)
   const displayText = translatedText || text
-
   return (
     <div className={className}>
       <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
         <MentionText text={displayText} />
       </div>
-      <TranslateButton
-        text={text}
-        onTranslated={setTranslatedText}
-        isTranslated={!!translatedText}
-        className="mt-2 text-xs"
-      />
+      <TranslateButton text={text} onTranslated={setTranslatedText}
+        isTranslated={!!translatedText} className="mt-2 text-xs" />
     </div>
   )
 }
 
-// Reply with translation support
-function ReplyCard({ reply }: { reply: { id: string; author: { displayName: string; isOnline: boolean }; body: string; createdAt: Date; attachments?: Attachment[] } }) {
+function ReplyCard({ message }: { message: Message }) {
   const { tr } = useForum()
   const [translatedText, setTranslatedText] = useState<string | null>(null)
-  
-  const rTime = getTimeAgo(reply.createdAt)
-  const rTimeStr = rTime.n !== undefined ? tr(rTime.key, { n: rTime.n }) : tr(rTime.key)
-  const rInitials = reply.author.displayName
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-  const displayText = translatedText || reply.body
+  const timeStr = getTimeAgoFromString(message.created_at)
+  const displayName = message.profile?.full_name ?? "Unknown"
+  const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
+  const displayText = translatedText || message.content
 
   return (
     <div className="flex gap-2.5 rounded-xl border border-border bg-card p-3 sm:gap-3 sm:p-4">
       <div className="relative shrink-0">
         <Avatar className="size-7 sm:size-8">
           <AvatarFallback className="bg-muted text-muted-foreground text-[10px] sm:text-xs font-medium">
-            {rInitials}
+            {initials}
           </AvatarFallback>
         </Avatar>
-        {reply.author.isOnline && (
-          <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-card bg-online sm:size-2.5" />
-        )}
       </div>
       <div className="flex flex-1 flex-col gap-1 sm:gap-1.5">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-foreground sm:text-sm">
-            {reply.author.displayName}
-          </span>
-          <span className="text-[10px] text-muted-foreground sm:text-[11px]">{rTimeStr}</span>
+          <span className="text-xs font-medium text-foreground sm:text-sm">{displayName}</span>
+          <span className="text-[10px] text-muted-foreground sm:text-[11px]">{timeStr}</span>
         </div>
         <div className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap sm:text-sm">
           <MentionText text={displayText} />
         </div>
-        {reply.attachments && reply.attachments.length > 0 && (
-          <AttachmentDisplay attachments={reply.attachments} />
+        {message.attachments && message.attachments.length > 0 && (
+          <AttachmentDisplay attachments={message.attachments} />
         )}
-        <TranslateButton
-          text={reply.body}
-          onTranslated={setTranslatedText}
-          isTranslated={!!translatedText}
-          className="mt-1 text-[10px] sm:text-xs"
-        />
+        <TranslateButton text={message.content} onTranslated={setTranslatedText}
+          isTranslated={!!translatedText} className="mt-1 text-[10px] sm:text-xs" />
       </div>
     </div>
   )
@@ -203,13 +168,14 @@ export function ThreadDetail() {
   }
 
   const thread = selectedThread
-  const time = getTimeAgo(thread.createdAt)
-  const timeStr = time.n !== undefined ? tr(time.key, { n: time.n }) : tr(time.key)
-  const authorInitials = thread.author.displayName
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
+  const timeStr = getTimeAgoFromString(thread.created_at)
+  const authorDisplayName = thread.profile?.full_name ?? "Unknown"
+  const authorInitials = authorDisplayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
   const isClosed = thread.status === "closed"
+
+  // replies = messages excluding the first (body) message
+  const replies = thread.messages.slice(1)
+  const replyCount = replies.length
 
   return (
     <div className="flex flex-1 flex-col bg-background">
@@ -224,7 +190,6 @@ export function ThreadDetail() {
         </button>
         <div className="flex flex-1 flex-col gap-1.5 sm:gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            {/* Status badge - eco blue for resolved, dan red for open */}
             {isClosed ? (
               <Badge className="h-5 gap-1 rounded-lg bg-[#0091ea]/10 text-[#0091ea] text-[10px] font-medium">
                 <CheckCircle2 className="size-3" />
@@ -247,15 +212,11 @@ export function ThreadDetail() {
           <h1 className="text-base font-semibold leading-snug text-foreground sm:text-lg text-balance">
             {thread.title}
           </h1>
-          {/* Equipment Tags */}
           {thread.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {thread.tags.map((tag) => (
-                <Badge
-                  key={tag}
-                  variant="secondary"
-                  className={cn("h-4 rounded px-1.5 text-[9px] font-medium", getTagColor(tag))}
-                >
+                <Badge key={tag} variant="secondary"
+                  className={cn("h-4 rounded px-1.5 text-[9px] font-medium", getTagColor(tag))}>
                   {tr(tag)}
                 </Badge>
               ))}
@@ -268,11 +229,10 @@ export function ThreadDetail() {
               </AvatarFallback>
             </Avatar>
             <span className="text-xs text-muted-foreground">
-              {tr("startedBy")} <span className="font-medium text-foreground">{thread.author.displayName}</span>
+              {tr("startedBy")} <span className="font-medium text-foreground">{authorDisplayName}</span>
             </span>
           </div>
         </div>
-        {/* Status toggle button */}
         <Button
           variant="outline"
           size="sm"
@@ -280,15 +240,9 @@ export function ThreadDetail() {
           className="hidden sm:flex h-8 gap-1.5 rounded-xl text-xs"
         >
           {isClosed ? (
-            <>
-              <CircleDot className="size-3.5" />
-              {tr("reopenThread")}
-            </>
+            <><CircleDot className="size-3.5" />{tr("reopenThread")}</>
           ) : (
-            <>
-              <CheckCircle2 className="size-3.5" />
-              {tr("markResolved")}
-            </>
+            <><CheckCircle2 className="size-3.5" />{tr("markResolved")}</>
           )}
         </Button>
       </div>
@@ -302,15 +256,9 @@ export function ThreadDetail() {
           className="h-8 w-full gap-1.5 rounded-xl text-xs"
         >
           {isClosed ? (
-            <>
-              <CircleDot className="size-3.5" />
-              {tr("reopenThread")}
-            </>
+            <><CircleDot className="size-3.5" />{tr("reopenThread")}</>
           ) : (
-            <>
-              <CheckCircle2 className="size-3.5" />
-              {tr("markResolved")}
-            </>
+            <><CheckCircle2 className="size-3.5" />{tr("markResolved")}</>
           )}
         </Button>
       </div>
@@ -318,7 +266,20 @@ export function ThreadDetail() {
       {/* Scrollable content */}
       <ScrollArea className="flex-1">
         <div className="px-4 py-4 sm:px-6 sm:py-5">
-          {/* Original post body with translate */}
+          {/* AI Summary banner (when closed) */}
+          {isClosed && (
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-[#0091ea]/20 bg-[#0091ea]/5 px-4 py-3">
+              <BookOpen className="mt-0.5 size-4 shrink-0 text-[#0091ea]" />
+              <div>
+                <p className="text-xs font-semibold text-[#0091ea]">AI Summary</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  このスレッドは解決済みです。AIが内容を要約してナレッジベースに保存しました。
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Original post body */}
           <TranslatableText text={thread.body} />
 
           <Separator className="my-5 sm:my-6" />
@@ -326,14 +287,11 @@ export function ThreadDetail() {
           {/* Replies */}
           <div className="flex flex-col gap-1">
             <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {thread.replies.length > 0
-                ? `${thread.replies.length} ${tr("replies")}`
-                : tr("noReplies")}
+              {replyCount > 0 ? `${replyCount} ${tr("replies")}` : tr("noReplies")}
             </h3>
-
             <div className="mt-3 flex flex-col gap-3 sm:gap-4">
-              {thread.replies.map((reply) => (
-                <ReplyCard key={reply.id} reply={reply} />
+              {replies.map((msg) => (
+                <ReplyCard key={msg.id} message={msg} />
               ))}
             </div>
           </div>
