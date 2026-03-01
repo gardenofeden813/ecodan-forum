@@ -96,16 +96,25 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       const safeName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")
       const storagePath = `${user.id}/${timestamp}-${random}-${safeName}`
 
-      // Upload using Supabase JS SDK (automatically uses session token)
-      const { error: uploadError } = await supabase.storage
-        .from("manuals")
-        .upload(storagePath, selectedFile, {
-          contentType: "application/pdf",
-          upsert: false,
-        })
+      // Get session token for authenticated upload
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error("セッションが見つかりません。再ログインしてください")
 
-      if (uploadError) {
-        throw new Error(uploadError.message)
+      // Upload directly via fetch with auth token (most reliable across all browsers)
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/manuals/${storagePath}`
+      const uploadResp = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${session.access_token}`,
+          "Content-Type": "application/pdf",
+          "x-upsert": "false",
+        },
+        body: selectedFile,
+      })
+      if (!uploadResp.ok) {
+        const errText = await uploadResp.text()
+        throw new Error(`Storage upload failed: ${errText}`)
       }
 
       // Get public URL
