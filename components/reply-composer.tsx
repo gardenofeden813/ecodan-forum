@@ -50,6 +50,9 @@ export function ReplyComposer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
 
+  // Keep a ref to duration so we can read the latest value inside onstop callback
+  const durationRef = useRef(0)
+
   const {
     isRecording,
     duration,
@@ -60,12 +63,33 @@ export function ReplyComposer({
     clearRecording,
   } = useVoiceRecorder()
 
+  // Keep durationRef in sync
+  useEffect(() => {
+    durationRef.current = duration
+  }, [duration])
+
   // When audioUrl/audioBlob become available after stopRecording, auto-set voiceAttachment
   useEffect(() => {
-    if (audioUrl && audioBlob && !isRecording && !voiceAttachment) {
-      setVoiceAttachment({ url: audioUrl, duration, blob: audioBlob })
+    if (audioUrl && audioBlob && !isRecording) {
+      setVoiceAttachment((prev) => {
+        // Don't overwrite if already set (e.g. user manually accepted)
+        if (prev) return prev
+        return { url: audioUrl, duration: durationRef.current, blob: audioBlob }
+      })
     }
-  }, [audioUrl, audioBlob, isRecording, duration]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioUrl, audioBlob, isRecording])
+
+  // Sync audio element src whenever voiceAttachment url changes
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (voiceAttachment?.url) {
+      audio.src = voiceAttachment.url
+      audio.load()
+    } else {
+      audio.src = ""
+    }
+  }, [voiceAttachment?.url])
 
   // Sync audio playback time
   useEffect(() => {
@@ -78,15 +102,13 @@ export function ReplyComposer({
 
   const handleStopRecording = useCallback(() => {
     stopRecording()
-    // voiceAttachment will be set by the useEffect above when audioUrl/audioBlob are ready
   }, [stopRecording])
 
-  const handleAcceptRecording = useCallback(() => {
-    if (!audioUrl) return
-    setVoiceAttachment({ url: audioUrl, duration, blob: audioBlob ?? undefined })
-  }, [audioUrl, duration, audioBlob])
-
   const handleDiscardRecording = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.src = ""
+    }
     setVoiceAttachment(null)
     clearRecording()
     setIsPlayingVoice(false)
@@ -114,17 +136,20 @@ export function ReplyComposer({
   }, [])
 
   // Play/pause voice preview
-  const toggleVoicePlayback = () => {
-    if (!audioRef.current || !voiceAttachment) return
+  const toggleVoicePlayback = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio || !voiceAttachment) return
     if (isPlayingVoice) {
-      audioRef.current.pause()
+      audio.pause()
       setIsPlayingVoice(false)
     } else {
-      audioRef.current.src = voiceAttachment.url
-      audioRef.current.play()
-      setIsPlayingVoice(true)
+      audio.play().then(() => {
+        setIsPlayingVoice(true)
+      }).catch((err) => {
+        console.error("Audio play error:", err)
+      })
     }
-  }
+  }, [isPlayingVoice, voiceAttachment])
 
   // Post — upload files first, then save message
   const handlePost = async () => {
@@ -154,9 +179,13 @@ export function ReplyComposer({
       // Upload voice to Supabase Storage
       if (voiceAttachment) {
         try {
-          const blob = voiceAttachment.blob ?? await fetch(voiceAttachment.url).then((r) => r.blob())
-          const ext = blob.type.includes("ogg") ? "ogg" : "webm"
-          const persistentUrl = await uploadToStorage(blob, `voice-${Date.now()}.${ext}`)
+          const rawBlob: Blob = voiceAttachment.blob
+            ?? await fetch(voiceAttachment.url).then((r) => r.blob())
+          // Derive extension from actual blob MIME type
+          const mime = rawBlob.type || "audio/webm"
+          const ext = mime.includes("ogg") ? "ogg" : mime.includes("mp4") ? "mp4" : "webm"
+          const filename = `voice-${Date.now()}.${ext}`
+          const persistentUrl = await uploadToStorage(rawBlob, filename)
           attachments.push({
             id: `voice-${Date.now()}`,
             type: "voice",
@@ -166,6 +195,7 @@ export function ReplyComposer({
           })
         } catch (err) {
           console.error("Voice upload failed:", err)
+          // Fall back to object URL (won't persist across sessions, but at least posts)
           attachments.push({
             id: `voice-${Date.now()}`,
             type: "voice",
@@ -192,6 +222,10 @@ export function ReplyComposer({
       setReplyText("")
       images.forEach((img) => URL.revokeObjectURL(img.url))
       setImages([])
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ""
+      }
       setVoiceAttachment(null)
       setCurrentPlayTime(0)
       setIsPlayingVoice(false)
@@ -300,6 +334,7 @@ export function ReplyComposer({
               <X className="size-4" />
             </button>
           </div>
+          {/* Hidden audio element — src is set via useEffect */}
           <audio
             ref={audioRef}
             onEnded={() => {
@@ -307,8 +342,14 @@ export function ReplyComposer({
               setCurrentPlayTime(0)
             }}
             className="hidden"
+            preload="auto"
           />
         </div>
+      )}
+
+      {/* Hidden audio element when voiceAttachment is null (keeps ref alive) */}
+      {!voiceAttachment && (
+        <audio ref={audioRef} className="hidden" />
       )}
 
       {/* Active recording indicator */}
@@ -329,32 +370,6 @@ export function ReplyComposer({
           >
             <Square className="size-3" />
             {tr("tapToStop")}
-          </Button>
-        </div>
-      )}
-
-      {/* Recording just finished - accept/discard */}
-      {audioUrl && !isRecording && !voiceAttachment && (
-        <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-4 py-3">
-          <Mic className="size-4 text-primary" />
-          <span className="flex-1 text-sm text-foreground">
-            {tr("voiceMessage")} ({formatDuration(duration)})
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleDiscardRecording}
-            className="h-7 rounded-lg text-xs text-muted-foreground"
-          >
-            <X className="mr-1 size-3" />
-            {tr("removeAttachment")}
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleAcceptRecording}
-            className="h-7 rounded-lg text-xs bg-primary text-primary-foreground"
-          >
-            {tr("attachVoice")}
           </Button>
         </div>
       )}
@@ -402,7 +417,7 @@ export function ReplyComposer({
               variant="ghost"
               size="sm"
               onClick={isRecording ? handleStopRecording : startRecording}
-              disabled={isPosting}
+              disabled={isPosting || !!voiceAttachment}
               className={cn(
                 "h-9 gap-1.5 rounded-lg px-3",
                 isRecording
@@ -418,21 +433,19 @@ export function ReplyComposer({
             </Button>
           </div>
 
-          {/* Send */}
+          {/* Post button */}
           <Button
             onClick={handlePost}
-            disabled={!hasContent || isRecording || isPosting}
+            disabled={!hasContent || isPosting || isRecording}
             size="sm"
-            className="h-9 gap-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
+            className="h-9 gap-1.5 rounded-lg px-4 text-sm"
           >
             {isPosting ? (
-              <Loader2 className="size-3.5 animate-spin" />
+              <Loader2 className="size-4 animate-spin" />
             ) : (
-              <Send className="size-3.5" />
+              <Send className="size-4" />
             )}
-            <span className="hidden sm:inline">
-              {isPosting ? "Sending..." : tr("postReply")}
-            </span>
+            <span className="hidden sm:inline">{tr("postReply")}</span>
           </Button>
         </div>
       </div>

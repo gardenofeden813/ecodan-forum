@@ -22,11 +22,23 @@ export function useVoiceRecorder() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Keep a ref to the current isRecording state so stopRecording doesn't
+  // capture a stale closure value
+  const isRecordingRef = useRef(false)
 
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
+
+      // Pick the best supported MIME type
+      const mimeType = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+      ].find((t) => MediaRecorder.isTypeSupported(t)) ?? ""
+
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
       mediaRecorderRef.current = mediaRecorder
       chunksRef.current = []
 
@@ -37,20 +49,25 @@ export function useVoiceRecorder() {
       }
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" })
+        isRecordingRef.current = false
+        const effectiveMime = mediaRecorder.mimeType || "audio/webm"
+        const blob = new Blob(chunksRef.current, { type: effectiveMime })
         const url = URL.createObjectURL(blob)
         setState((prev) => ({ ...prev, audioUrl: url, audioBlob: blob, isRecording: false }))
         stream.getTracks().forEach((track) => track.stop())
       }
 
-      mediaRecorder.start()
+      // Request data every 250ms to ensure we get chunks even for short recordings
+      mediaRecorder.start(250)
 
+      isRecordingRef.current = true
       setState({ isRecording: true, duration: 0, audioUrl: null, audioBlob: null, error: null })
 
       timerRef.current = setInterval(() => {
         setState((prev) => ({ ...prev, duration: prev.duration + 1 }))
       }, 1000)
     } catch {
+      isRecordingRef.current = false
       setState((prev) => ({
         ...prev,
         error: "Microphone access denied",
@@ -59,15 +76,16 @@ export function useVoiceRecorder() {
     }
   }, [])
 
+  // Use isRecordingRef instead of state.isRecording to avoid stale closure
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && state.isRecording) {
+    if (mediaRecorderRef.current && isRecordingRef.current) {
       mediaRecorderRef.current.stop()
       if (timerRef.current) {
         clearInterval(timerRef.current)
         timerRef.current = null
       }
     }
-  }, [state.isRecording])
+  }, [])
 
   const clearRecording = useCallback(() => {
     if (state.audioUrl) {
