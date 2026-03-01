@@ -199,6 +199,8 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   const loadStartTimeRef = useRef<number>(0)
 
   // NOTE: No dependency on selectedThread state — use refs instead to avoid infinite loop
+  // Uses API Route (/api/threads GET) for server-side auth to avoid Supabase client-side
+  // JWT refresh hang on mobile that caused threads to stop loading after posting.
   const loadThreads = useCallback(async () => {
     // Prevent concurrent loads, but release the lock if it's been held for >15s (stuck)
     if (isLoadingRef.current) {
@@ -211,26 +213,26 @@ export function ForumProvider({ children }: { children: ReactNode }) {
     loadStartTimeRef.current = Date.now()
     setIsLoading(true)
     try {
-      // Fetch all data in parallel for speed
-      const [threadResult, profileResult, messageResult, knowledgeResult] = await Promise.all([
-        supabase.from("threads").select("*").order("created_at", { ascending: false }),
-        supabase.from("profiles").select("*"),
-        supabase.from("messages").select("*").order("created_at", { ascending: true }),
-        supabase.from("knowledge_entries").select("*"),
-      ])
+      // Fetch all data via server-side API Route (avoids client-side JWT refresh issues)
+      const res = await fetch("/api/threads", { cache: "no-store" })
+      if (!res.ok) {
+        console.error("loadThreads: API error", res.status)
+        setThreads([])
+        return
+      }
+      const { threads: threadRows, profiles, messages: allMessages, knowledge_entries } = await res.json()
 
-      const threadRows = threadResult.data
-      if (!threadRows) {
+      if (!threadRows || threadRows.length === 0) {
         setThreads([])
         return
       }
 
       const profileMap = new Map<string, Profile>(
-        (profileResult.data ?? []).map((p) => [p.id, p])
+        (profiles ?? []).map((p: Profile) => [p.id, p])
       )
 
       const messagesByThread = new Map<string, Message[]>()
-      for (const msg of messageResult.data ?? []) {
+      for (const msg of allMessages ?? []) {
         const mentions = parseMentions(msg.content)
         const attachments: Attachment[] = Array.isArray(msg.attachments) ? msg.attachments : []
         const enriched: Message = {
@@ -244,15 +246,15 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       }
 
       const knowledgeByThread = new Map<string, KnowledgeEntry>(
-        (knowledgeResult.data ?? []).map((k) => [k.thread_id, k as KnowledgeEntry])
+        (knowledge_entries ?? []).map((k: KnowledgeEntry) => [k.thread_id, k])
       )
 
-      const enrichedThreads: Thread[] = threadRows.map((row) => {
-        const msgs = messagesByThread.get(row.id) ?? []
+      const enrichedThreads: Thread[] = threadRows.map((row: Record<string, unknown>) => {
+        const msgs = messagesByThread.get(row.id as string) ?? []
         const firstMsg = msgs[0]
         const body = firstMsg?.content ?? ""
         const mentions = parseMentions(body)
-        const tags = extractTagsFromCategory(row.category)
+        const tags = extractTagsFromCategory(row.category as string)
 
         return {
           id: row.id,
@@ -261,12 +263,12 @@ export function ForumProvider({ children }: { children: ReactNode }) {
           status: row.status as "open" | "closed",
           created_at: row.created_at,
           created_by: row.created_by,
-          profile: profileMap.get(row.created_by) ?? null,
+          profile: profileMap.get(row.created_by as string) ?? null,
           messages: msgs,
           mentions,
           tags,
           body,
-          knowledge_entry: knowledgeByThread.get(row.id) ?? null,
+          knowledge_entry: knowledgeByThread.get(row.id as string) ?? null,
         }
       })
 
@@ -278,6 +280,9 @@ export function ForumProvider({ children }: { children: ReactNode }) {
         const updated = enrichedThreads.find((t) => t.id === currentSelectedId)
         if (updated) setSelectedThreadRef.current(updated)
       }
+    } catch (err) {
+      console.error("loadThreads error:", err)
+      setThreads([])
     } finally {
       isLoadingRef.current = false
       setIsLoading(false)
