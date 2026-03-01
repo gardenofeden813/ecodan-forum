@@ -180,7 +180,7 @@ function TranslatableText({ text, className }: { text: string; className?: strin
   const displayText = translatedText || text
   return (
     <div className={className}>
-      <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+      <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
         <MentionText text={displayText} />
       </div>
       <TranslateButton text={text} onTranslated={setTranslatedText}
@@ -241,7 +241,7 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
             <span className="text-xs font-medium text-foreground sm:text-sm">{displayName}</span>
             <span className="text-[10px] text-muted-foreground sm:text-[11px]">{timeStr}</span>
           </div>
-          <div className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap sm:text-sm">
+          <div className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap break-words sm:text-sm">
             <MentionText text={displayText} />
           </div>
           {message.attachments && message.attachments.length > 0 && (
@@ -362,7 +362,7 @@ export function ThreadDetail() {
     // Use flex-col with overflow-hidden; the scroll area is a plain div with overflow-y-auto
     <div className="flex flex-1 flex-col bg-background overflow-hidden min-h-0">
       {/* Thread header */}
-      <div className="flex items-start gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4 shrink-0">
+      <div className="flex items-start gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4 shrink-0 overflow-hidden">
         <button
           onClick={() => setSelectedThread(null)}
           className="mt-0.5 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
@@ -391,7 +391,7 @@ export function ThreadDetail() {
             </Badge>
             <span className="text-[11px] text-muted-foreground">{timeStr}</span>
           </div>
-          <h1 className="text-base font-semibold leading-snug text-foreground sm:text-lg text-balance">
+          <h1 className="text-base font-semibold leading-snug text-foreground sm:text-lg break-words">
             {thread.title}
           </h1>
           {thread.tags.length > 0 && (
@@ -446,7 +446,7 @@ export function ThreadDetail() {
       </div>
 
       {/* Scrollable content — native overflow-y-auto for reliable mobile scrolling */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
         <div className="px-4 py-4 sm:px-6 sm:py-5">
           {/* AI Summary banner (when closed, no knowledge entry yet) */}
           {isClosed && !thread.knowledge_entry && (
