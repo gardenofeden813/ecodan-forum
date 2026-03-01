@@ -29,21 +29,21 @@ function ForumLayout() {
         <span className="text-sm font-semibold text-foreground tracking-tight">{tr("appName")}</span>
       </div>
 
-      {/* Sidebar overlay for mobile */}
+      {/* Sidebar overlay for mobile — only rendered when open to avoid fixed+translate causing iOS horizontal scroll */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <aside className="fixed inset-y-0 left-0 z-50 w-72 h-dvh md:hidden">
+            <ForumSidebar onCloseMobile={() => setSidebarOpen(false)} />
+          </aside>
+        </>
       )}
 
-      {/* Sidebar - drawer on mobile, fixed on md+ */}
-      <aside
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 w-72 h-dvh transform transition-transform duration-200 ease-out md:relative md:z-auto md:h-full md:w-64 md:translate-x-0 md:transition-none lg:w-72",
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        )}
-      >
+      {/* Sidebar - always visible on md+ (not fixed, part of normal flow) */}
+      <aside className="hidden md:flex md:h-full md:w-64 lg:w-72 shrink-0">
         <ForumSidebar onCloseMobile={() => setSidebarOpen(false)} />
       </aside>
 
