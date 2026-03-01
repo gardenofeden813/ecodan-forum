@@ -510,20 +510,29 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
    // ── signOut ───────────────────────────────────────────────────────────
   const signOut = useCallback(async () => {
+    // Sign out on client side with 3s timeout (clears in-memory session)
     try {
-      // Sign out on client side (clears in-memory session)
-      await supabase.auth.signOut()
+      await Promise.race([
+        supabase.auth.signOut(),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("signOut timeout")), 3000)
+        ),
+      ])
     } catch (e) {
-      console.warn("signOut: client signOut failed", e)
+      console.warn("signOut: client signOut failed or timed out", e)
     }
-    // Sign out on server side via API Route (clears Cookie session)
-    // Then hard-redirect — middleware will enforce /login for unauthenticated users
+    // Sign out on server side via API Route (explicitly deletes auth Cookies)
     try {
-      await fetch("/api/auth/signout", { method: "POST" })
+      await Promise.race([
+        fetch("/api/auth/signout", { method: "POST" }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("server signOut timeout")), 5000)
+        ),
+      ])
     } catch (e) {
-      console.warn("signOut: server signOut failed", e)
+      console.warn("signOut: server signOut failed or timed out", e)
     }
-    // Hard redirect regardless of whether server signout succeeded
+    // Hard redirect regardless of outcome — proxy.ts will enforce /login
     if (typeof window !== "undefined") {
       window.location.href = "/login"
     }

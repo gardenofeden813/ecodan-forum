@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { cookies } from "next/headers"
 
 export async function POST() {
   try {
-    const supabase = await createClient()
-    // Sign out on the server side — this clears the Cookie-based session
-    await supabase.auth.signOut()
+    const cookieStore = await cookies()
+    // Delete all Supabase auth cookies explicitly
+    // Supabase uses cookies named like: sb-<project-ref>-auth-token, sb-<project-ref>-auth-token.0, etc.
+    const allCookies = cookieStore.getAll()
+    for (const cookie of allCookies) {
+      if (cookie.name.startsWith("sb-") && cookie.name.includes("auth")) {
+        cookieStore.delete(cookie.name)
+      }
+    }
   } catch (e) {
-    console.warn("server signOut error:", e)
+    console.warn("server signOut cookie deletion error:", e)
   }
-  // Return 200 OK — client will handle the redirect
   return NextResponse.json({ ok: true })
 }
