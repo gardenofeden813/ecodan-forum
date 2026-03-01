@@ -35,7 +35,9 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get("file") as File | null
     if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 })
-    if (file.type !== "application/pdf") {
+    // iOS Safari may send PDF with empty or different MIME type
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+    if (!isPdf) {
       return NextResponse.json({ error: "Only PDF files are allowed" }, { status: 400 })
     }
 

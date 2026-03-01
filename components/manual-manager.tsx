@@ -53,7 +53,10 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.type !== "application/pdf") {
+    // iOS Safari sometimes reports PDF as empty string or different MIME type
+    // so we check both MIME type and file extension
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+    if (!isPdf) {
       setError("PDFファイルのみアップロードできます")
       return
     }
@@ -185,30 +188,30 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
             </div>
             <div className="col-span-2 space-y-1">
               <Label htmlFor="pdf-file">PDF File *</Label>
-              <div className="flex gap-2">
+              {/* Use a visible label wrapping the input for iOS Safari compatibility.
+                  Hidden inputs triggered via .click() are blocked on iOS. */}
+              <label
+                htmlFor="pdf-file"
+                className="flex items-center gap-2 w-full cursor-pointer rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background hover:bg-accent hover:text-accent-foreground"
+              >
+                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="flex-1 truncate text-muted-foreground">
+                  {selectedFile ? selectedFile.name : "Choose PDF file..."}
+                </span>
+                {selectedFile && (
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {formatFileSize(selectedFile.size)}
+                  </span>
+                )}
                 <input
                   ref={fileInputRef}
                   id="pdf-file"
                   type="file"
-                  accept="application/pdf"
+                  accept=".pdf,application/pdf"
                   onChange={handleFileChange}
-                  className="hidden"
+                  className="sr-only"
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1 justify-start gap-2"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <FileText className="h-4 w-4" />
-                  {selectedFile ? selectedFile.name : "Choose PDF file..."}
-                </Button>
-                {selectedFile && (
-                  <span className="text-xs text-muted-foreground self-center">
-                    {formatFileSize(selectedFile.size)}
-                  </span>
-                )}
-              </div>
+              </label>
             </div>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
