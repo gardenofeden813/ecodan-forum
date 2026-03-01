@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 import { NotificationSettingsDialog } from "@/components/notification-settings-dialog"
 import { ManualManager } from "@/components/manual-manager"
+import { ErrorCodeLookup } from "@/components/error-code-lookup"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
@@ -280,6 +281,8 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
       <Separator className="shrink-0 bg-sidebar-border" />
 
       <div className="shrink-0 flex flex-col gap-2 p-3">
+        {/* Error Code Lookup — visible to all users */}
+        <ErrorCodeLookup />
         {/* Admin: Manual Manager */}
         {isAdmin && (
           <ManualManager
