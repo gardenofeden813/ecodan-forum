@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import 'pdfjs-dist/web/pdf_viewer.css';
 
 @custom-variant dark (&:is(.dark *));
 

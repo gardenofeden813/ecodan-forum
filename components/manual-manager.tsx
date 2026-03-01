@@ -100,7 +100,10 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) throw new Error("セッションが見つかりません。再ログインしてください")
 
-      // Upload directly via fetch with auth token (most reliable across all browsers)
+      // Read file as ArrayBuffer first (required for iOS Safari - body: File doesn't work)
+      const arrayBuffer = await selectedFile.arrayBuffer()
+
+      // Upload directly via fetch with auth token
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
       const uploadUrl = `${supabaseUrl}/storage/v1/object/manuals/${storagePath}`
       const uploadResp = await fetch(uploadUrl, {
@@ -110,7 +113,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
           "Content-Type": "application/pdf",
           "x-upsert": "false",
         },
-        body: selectedFile,
+        body: arrayBuffer,
       })
       if (!uploadResp.ok) {
         const errText = await uploadResp.text()

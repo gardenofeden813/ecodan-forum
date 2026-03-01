@@ -70,6 +70,7 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
+  const pageContainerRef = useRef<HTMLDivElement>(null)
   const renderTaskRef = useRef<import("pdfjs-dist").RenderTask | null>(null)
   const loadingTaskRef = useRef<import("pdfjs-dist").PDFDocumentLoadingTask | null>(null)
 
@@ -117,9 +118,10 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
 
   // Render page
   const renderPage = useCallback(async (doc: import("pdfjs-dist").PDFDocumentProxy, pageNum: number, sc: number) => {
-    if (!canvasRef.current || !textLayerRef.current) return
+    if (!canvasRef.current || !textLayerRef.current || !pageContainerRef.current) return
     const canvas = canvasRef.current
     const textLayer = textLayerRef.current
+    const pageContainer = pageContainerRef.current
 
     // Cancel previous render
     if (renderTaskRef.current) {
@@ -130,14 +132,23 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
     try {
       const page = await doc.getPage(pageNum)
       const viewport = page.getViewport({ scale: sc })
+
+      // Set canvas dimensions
       canvas.width = viewport.width
       canvas.height = viewport.height
 
+      // Render PDF page to canvas
       const renderTask = page.render({ canvas, viewport })
       renderTaskRef.current = renderTask
       await renderTask.promise
 
-      // Render text layer for selection
+      // Set --total-scale-factor on the page container
+      // This is REQUIRED by pdfjs-dist v4+ TextLayer CSS for correct positioning
+      pageContainer.style.setProperty("--total-scale-factor", String(sc))
+      pageContainer.style.width = `${viewport.width}px`
+      pageContainer.style.height = `${viewport.height}px`
+
+      // Clear and resize text layer
       textLayer.innerHTML = ""
       textLayer.style.width = `${viewport.width}px`
       textLayer.style.height = `${viewport.height}px`
@@ -390,19 +401,21 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
             </div>
           )}
           {selectedManualId && !loading && pdfDoc && (
+            /* pageContainerRef holds --total-scale-factor for PDF.js TextLayer CSS */
             <div
+              ref={pageContainerRef}
               className="relative inline-block mx-auto shadow-lg"
+              style={{ position: "relative" }}
               onMouseUp={handleTextSelection}
             >
               <canvas ref={canvasRef} className="block" />
               <div
                 ref={textLayerRef}
-                className="absolute top-0 left-0 select-text"
+                className="textLayer"
                 style={{
-                  // pdfjs text layer styles
-                  overflow: "hidden",
-                  opacity: 0.2,
-                  lineHeight: 1,
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
                   pointerEvents: "auto",
                 }}
               />
