@@ -1,18 +1,20 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Search, MessageSquare, User, AtSign, Wrench, PlayCircle,
   AlertTriangle, FileQuestion, Box, Thermometer, Droplets,
   Snowflake, Cable, Tv2, Globe, LogOut, X, Bell,
 } from "lucide-react"
 import { NotificationSettingsDialog } from "@/components/notification-settings-dialog"
+import { ManualManager } from "@/components/manual-manager"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { useForum } from "@/lib/forum-context"
 import type { Category, Tag } from "@/lib/forum-data"
+import type { Manual } from "@/lib/manuals"
 import { cn } from "@/lib/utils"
 
 const categoryIcons: Record<Category, typeof Wrench> = {
@@ -55,6 +57,23 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
   } = useForum()
 
   const [notifOpen, setNotifOpen] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [manuals, setManuals] = useState<Manual[]>([])
+
+  useEffect(() => {
+    fetch("/api/admin/check")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.isAdmin) {
+          setIsAdmin(true)
+          fetch("/api/manuals")
+            .then((r) => r.json())
+            .then((md) => setManuals(md.manuals ?? []))
+            .catch(() => {})
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const navItems = [
     { key: "all" as const, label: tr("allThreads"), icon: MessageSquare },
@@ -261,6 +280,15 @@ export function ForumSidebar({ onCloseMobile }: ForumSidebarProps) {
       <Separator className="shrink-0 bg-sidebar-border" />
 
       <div className="shrink-0 flex flex-col gap-2 p-3">
+        {/* Admin: Manual Manager */}
+        {isAdmin && (
+          <ManualManager
+            manuals={manuals}
+            onUpload={(manual) => setManuals((prev) => [manual, ...prev])}
+            onDelete={(id) => setManuals((prev) => prev.filter((m) => m.id !== id))}
+          />
+        )}
+
         {/* Language switcher */}
         <button
           onClick={() => setLocale(locale === "en" ? "ja" : "en")}

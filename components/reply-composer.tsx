@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { ImagePlus, Mic, MicOff, X, Send, Play, Pause, Square, Loader2, CornerDownLeft } from "lucide-react"
+import { ImagePlus, Mic, MicOff, X, Send, Play, Pause, Square, Loader2, CornerDownLeft, Quote } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { MentionTextarea } from "@/components/mention-textarea"
 import { useForum } from "@/lib/forum-context"
@@ -9,6 +9,9 @@ import { useVoiceRecorder } from "@/hooks/use-voice-recorder"
 import type { Attachment } from "@/lib/forum-data"
 import type { Message } from "@/lib/forum-context"
 import { cn } from "@/lib/utils"
+import { PdfViewerDialog } from "@/components/pdf-viewer-dialog"
+import { ManualCitationCard } from "@/components/manual-citation-card"
+import type { ManualCitation, Manual } from "@/lib/manuals"
 
 interface ReplyComposerProps {
   threadId: string
@@ -49,6 +52,12 @@ export function ReplyComposer({
   const [currentPlayTime, setCurrentPlayTime] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
+
+  // Citation state
+  const [citations, setCitations] = useState<ManualCitation[]>([])
+  const [pdfViewerOpen, setPdfViewerOpen] = useState(false)
+  const [manuals, setManuals] = useState<Manual[]>([])
+  const [manualsLoaded, setManualsLoaded] = useState(false)
 
   // Keep a ref to duration so we can read the latest value inside onstop callback
   const durationRef = useRef(0)
@@ -151,9 +160,30 @@ export function ReplyComposer({
     }
   }, [isPlayingVoice, voiceAttachment])
 
+  // Load manuals lazily when PDF viewer is opened
+  const handleOpenPdfViewer = useCallback(async () => {
+    if (!manualsLoaded) {
+      try {
+        const resp = await fetch("/api/manuals")
+        if (resp.ok) {
+          const data = await resp.json()
+          setManuals(data.manuals ?? [])
+          setManualsLoaded(true)
+        }
+      } catch (e) {
+        console.error("Failed to load manuals:", e)
+      }
+    }
+    setPdfViewerOpen(true)
+  }, [manualsLoaded])
+
+  const handleAddCitation = useCallback((citation: ManualCitation) => {
+    setCitations((prev) => [...prev, citation])
+  }, [])
+
   // Post — upload files first, then save message
   const handlePost = async () => {
-    const hasContent = replyText.trim() || images.length > 0 || voiceAttachment
+    const hasContent = replyText.trim() || images.length > 0 || voiceAttachment || citations.length > 0
     if (!hasContent || isPosting) return
 
     setIsPosting(true)
@@ -216,12 +246,19 @@ export function ReplyComposer({
         }
       }
 
+      // Append citations as a special JSON block in the message content
+      if (citations.length > 0) {
+        const citationBlock = `\n\n<!-- citations:${JSON.stringify(citations)} -->`
+        finalText += citationBlock
+      }
+
       await addReply(threadId, finalText, attachments.length > 0 ? attachments : undefined, replyingTo?.id ?? null)
 
       // Reset state
       setReplyText("")
       images.forEach((img) => URL.revokeObjectURL(img.url))
       setImages([])
+      setCitations([])
       if (audioRef.current) {
         audioRef.current.pause()
         audioRef.current.src = ""
@@ -236,7 +273,7 @@ export function ReplyComposer({
     }
   }
 
-  const hasContent = replyText.trim() || images.length > 0 || voiceAttachment
+  const hasContent = replyText.trim() || images.length > 0 || voiceAttachment || citations.length > 0
   const formatDuration = (s: number) =>
     `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`
 
@@ -296,6 +333,19 @@ export function ReplyComposer({
                 <X className="size-3" />
               </button>
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* Citation cards */}
+      {citations.length > 0 && (
+        <div className="mb-3 space-y-2">
+          {citations.map((citation, i) => (
+            <ManualCitationCard
+              key={i}
+              citation={citation}
+              onRemove={() => setCitations((prev) => prev.filter((_, idx) => idx !== i))}
+            />
           ))}
         </div>
       )}
@@ -431,6 +481,20 @@ export function ReplyComposer({
                 {isRecording ? tr("tapToStop") : tr("attachVoice")}
               </span>
             </Button>
+
+            {/* Cite manual */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleOpenPdfViewer}
+              disabled={isPosting || isRecording}
+              className="h-9 gap-1.5 rounded-lg px-3 text-muted-foreground hover:text-foreground"
+              aria-label="Cite from manual"
+            >
+              <Quote className="size-4" />
+              <span className="hidden text-xs sm:inline">Cite Manual</span>
+            </Button>
           </div>
 
           {/* Post button */}
@@ -449,6 +513,14 @@ export function ReplyComposer({
           </Button>
         </div>
       </div>
+
+      {/* PDF Viewer Dialog */}
+      <PdfViewerDialog
+        open={pdfViewerOpen}
+        onClose={() => setPdfViewerOpen(false)}
+        manuals={manuals}
+        onCite={handleAddCitation}
+      />
     </div>
   )
 }

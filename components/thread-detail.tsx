@@ -13,7 +13,23 @@ import type { Message } from "@/lib/forum-context"
 import { MentionText } from "@/components/mention-text"
 import { ReplyComposer } from "@/components/reply-composer"
 import { TranslateButton } from "@/components/translate-button"
+import { ManualCitationCard } from "@/components/manual-citation-card"
+import type { ManualCitation } from "@/lib/manuals"
 import { cn } from "@/lib/utils"
+
+// Parse citation JSON blocks from message content
+function parseCitations(content: string): { text: string; citations: ManualCitation[] } {
+  const citationRegex = /\n\n<!-- citations:([\s\S]*?) -->/
+  const match = content.match(citationRegex)
+  if (!match) return { text: content, citations: [] }
+  try {
+    const citations = JSON.parse(match[1]) as ManualCitation[]
+    const text = content.replace(citationRegex, "").trim()
+    return { text, citations }
+  } catch {
+    return { text: content, citations: [] }
+  }
+}
 
 function getTimeAgoFromString(dateStr: string): string {
   const date = new Date(dateStr)
@@ -190,7 +206,8 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
   const timeStr = getTimeAgoFromString(message.created_at)
   const displayName = message.profile?.full_name ?? "Unknown"
   const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
-  const displayText = translatedText || message.content
+  const { text: cleanContent, citations } = parseCitations(message.content)
+  const displayText = translatedText || cleanContent
   const isBeingRepliedTo = replyingToId === message.id
 
   // Find direct children of this message
@@ -230,8 +247,15 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
           {message.attachments && message.attachments.length > 0 && (
             <AttachmentDisplay attachments={message.attachments} />
           )}
+          {citations.length > 0 && (
+            <div className="mt-2 space-y-2">
+              {citations.map((citation, i) => (
+                <ManualCitationCard key={i} citation={citation} />
+              ))}
+            </div>
+          )}
           <div className="mt-1 flex items-center gap-3">
-            <TranslateButton text={message.content} onTranslated={setTranslatedText}
+            <TranslateButton text={cleanContent} onTranslated={setTranslatedText}
               isTranslated={!!translatedText} className="text-[10px] sm:text-xs" />
             {!isClosed && (
               <button
