@@ -335,50 +335,19 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   // ── addThread ──────────────────────────────────────────────────────────────
   const addThread = useCallback(
     async (title: string, body: string, category: Category, _tags: Tag[]) => {
-      // Get the current user — use cached value first, fall back to fresh fetch
-      let uid = currentUser?.id
-      if (!uid) {
-        // Add a timeout to prevent hanging on mobile
-        const authPromise = supabase.auth.getUser()
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Auth timeout")), 8000)
-        )
-        const { data: { user } } = await Promise.race([authPromise, timeoutPromise]) as Awaited<typeof authPromise>
-        uid = user?.id
-      }
-      if (!uid) {
-        throw new Error("Not authenticated")
+      // Use API Route for server-side auth (avoids Supabase client-side JWT refresh hang on mobile)
+      const res = await fetch("/api/threads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, category, messageBody: body }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? `Failed to create thread (${res.status})`)
       }
 
-      const { data: thread, error: threadError } = await supabase
-        .from("threads")
-        .insert({
-          title,
-          category,
-          status: "open",
-          created_by: uid,
-        })
-        .select()
-        .single()
-
-      if (threadError || !thread) {
-        console.error("Thread insert error:", threadError)
-        throw new Error(threadError?.message ?? "Failed to create thread")
-      }
-
-      // Insert first message as body
-      if (body.trim()) {
-        const { error: msgError } = await supabase.from("messages").insert({
-          thread_id: thread.id,
-          content: body,
-          sender_id: uid,
-          attachments: [],
-        })
-        if (msgError) {
-          console.error("Message insert error:", msgError)
-          // Don't throw here — thread was created, just the body message failed
-        }
-      }
+      const { thread } = await res.json()
 
       // Set the new thread ID in the ref so loadThreads will auto-select it
       selectedThreadIdRef.current = thread.id
@@ -390,31 +359,29 @@ export function ForumProvider({ children }: { children: ReactNode }) {
       // Reload threads immediately (don't rely solely on Realtime on mobile)
       await loadThreads()
     },
-    [currentUser, loadThreads]
+    [loadThreads]
   )
 
   // ── addReply ───────────────────────────────────────────────────────────────
   const addReply = useCallback(
     async (threadId: string, body: string, attachments?: Attachment[], parentId?: string | null) => {
-      if (!currentUser) return
-
-      const { error } = await supabase.from("messages").insert({
-        thread_id: threadId,
-        content: body,
-        sender_id: currentUser.id,
-        attachments: attachments && attachments.length > 0 ? attachments : [],
-        ...(parentId ? { parent_id: parentId } : {}),
+      // Use API Route for server-side auth (avoids Supabase client-side JWT refresh hang on mobile)
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId, content: body, attachments, parentId }),
       })
 
-      if (error) {
-        console.error("Message insert error:", error)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error("Message insert error:", data.error)
         return
       }
 
       // Don't await — Realtime will trigger loadThreads automatically
       loadThreads()
     },
-    [currentUser, loadThreads]
+    [loadThreads]
   )
 
   // ── toggleThreadStatus ─────────────────────────────────────────────────────
@@ -425,13 +392,15 @@ export function ForumProvider({ children }: { children: ReactNode }) {
 
       const newStatus = thread.status === "open" ? "closed" : "open"
 
-      const { error } = await supabase
-        .from("threads")
-        .update({ status: newStatus })
-        .eq("id", threadId)
+      const res = await fetch(`/api/threads/${threadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      })
 
-      if (error) {
-        console.error("Status update error:", error)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error("Status update error:", data.error)
         return
       }
 
