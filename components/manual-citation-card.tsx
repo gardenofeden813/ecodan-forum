@@ -16,16 +16,15 @@ export function ManualCitationCard({ citation, onRemove }: ManualCitationCardPro
   const [expanded, setExpanded] = useState(true)
 
   // Build a URL that opens the PDF at a specific page
-  // Most PDF viewers support #page=N fragment
   const pdfUrl = `${citation.file_url}#page=${citation.page_number}`
 
   return (
-    <div className="border rounded-lg overflow-hidden bg-muted/20 text-sm">
+    <div className="border rounded-lg overflow-hidden bg-muted/20 text-sm w-full min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-muted/40 border-b">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center justify-between px-3 py-2 bg-muted/40 border-b min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
           <BookOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span className="font-medium truncate">{citation.manual_title}</span>
+          <span className="font-medium truncate min-w-0">{citation.manual_title}</span>
           {citation.manual_type && (
             <Badge variant="secondary" className="text-xs shrink-0">
               {citation.manual_type}
@@ -33,7 +32,7 @@ export function ManualCitationCard({ citation, onRemove }: ManualCitationCardPro
           )}
           <span className="text-xs text-muted-foreground shrink-0">p.{citation.page_number}</span>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0 ml-1">
           <Button
             variant="ghost"
             size="icon"
@@ -70,7 +69,7 @@ export function ManualCitationCard({ citation, onRemove }: ManualCitationCardPro
 
       {/* Body */}
       {expanded && (
-        <div className="p-3 space-y-2">
+        <div className="p-3 space-y-2 min-w-0 overflow-hidden">
           {/* Highlight image */}
           {citation.highlight_image && (
             <div className="border rounded overflow-hidden bg-white">
@@ -82,15 +81,18 @@ export function ManualCitationCard({ citation, onRemove }: ManualCitationCardPro
               />
             </div>
           )}
-          {/* Selected text */}
+          {/* Selected text — force wrap long words/strings */}
           {citation.selected_text && (
-            <blockquote className="border-l-2 border-primary pl-3 italic text-muted-foreground text-xs leading-relaxed">
+            <blockquote
+              className="border-l-2 border-primary pl-3 italic text-muted-foreground text-xs leading-relaxed"
+              style={{ overflowWrap: "break-word", wordBreak: "break-word", minWidth: 0 }}
+            >
               &ldquo;{citation.selected_text}&rdquo;
             </blockquote>
           )}
           {/* Model name */}
           {citation.model_name && (
-            <p className="text-xs text-muted-foreground">Model: {citation.model_name}</p>
+            <p className="text-xs text-muted-foreground truncate">{citation.model_name && `Model: ${citation.model_name}`}</p>
           )}
         </div>
       )}

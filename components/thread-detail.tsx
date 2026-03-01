@@ -226,7 +226,7 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
         </div>
       )}
       <div className={cn(
-        "flex gap-2.5 rounded-xl border bg-card p-3 sm:gap-3 sm:p-4 transition-colors",
+        "flex gap-2.5 rounded-xl border bg-card p-3 sm:gap-3 sm:p-4 transition-colors overflow-hidden",
         isBeingRepliedTo ? "border-primary/40 bg-primary/5" : "border-border"
       )}>
         <div className="relative shrink-0">
@@ -236,7 +236,7 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
             </AvatarFallback>
           </Avatar>
         </div>
-        <div className="flex flex-1 flex-col gap-1 sm:gap-1.5">
+        <div className="flex flex-1 flex-col gap-1 sm:gap-1.5 min-w-0 overflow-hidden">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-foreground sm:text-sm">{displayName}</span>
             <span className="text-[10px] text-muted-foreground sm:text-[11px]">{timeStr}</span>
@@ -248,7 +248,7 @@ function ReplyCard({ message, allMessages, depth, replyingToId, onReplyTo, isClo
             <AttachmentDisplay attachments={message.attachments} />
           )}
           {citations.length > 0 && (
-            <div className="mt-2 space-y-2">
+            <div className="mt-2 space-y-2 min-w-0 overflow-hidden w-full">
               {citations.map((citation, i) => (
                 <ManualCitationCard key={i} citation={citation} />
               ))}
