@@ -508,12 +508,24 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notificationSettings])
 
-  // ── signOut ────────────────────────────────────────────────────────────────
+   // ── signOut ───────────────────────────────────────────────────────────
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut()
-    // Hard redirect to login page
+    try {
+      // Sign out on client side (clears in-memory session)
+      await supabase.auth.signOut()
+    } catch (e) {
+      console.warn("signOut: client signOut failed", e)
+    }
+    // Sign out on server side via API Route (clears Cookie session)
+    // Then hard-redirect — middleware will enforce /login for unauthenticated users
+    try {
+      await fetch("/api/auth/signout", { method: "POST" })
+    } catch (e) {
+      console.warn("signOut: server signOut failed", e)
+    }
+    // Hard redirect regardless of whether server signout succeeded
     if (typeof window !== "undefined") {
-      window.location.replace("/login")
+      window.location.href = "/login"
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
