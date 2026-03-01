@@ -30,9 +30,11 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
 import { BookOpen, Trash2, Upload, FileText, Loader2, Settings } from "lucide-react"
 import type { Manual } from "@/lib/manuals"
 import { MANUAL_TYPES } from "@/lib/manuals"
+import { createClient } from "@/lib/supabase/client"
 
 interface ManualManagerProps {
   manuals: Manual[]
@@ -43,6 +45,7 @@ interface ManualManagerProps {
 export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProps) {
   const [open, setOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [modelName, setModelName] = useState("")
@@ -53,8 +56,6 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    // iOS Safari sometimes reports PDF as empty string or different MIME type
-    // so we check both MIME type and file extension
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
     if (!isPdf) {
       setError("PDFファイルのみアップロードできます")
@@ -62,7 +63,6 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
     }
     setSelectedFile(file)
     setError(null)
-    // Auto-fill title from filename
     if (!title) {
       setTitle(file.name.replace(/\.pdf$/i, "").replace(/[-_]/g, " "))
     }
@@ -74,19 +74,69 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       return
     }
     setUploading(true)
+    setUploadProgress(0)
     setError(null)
-    try {
-      // 1. Upload PDF to storage
-      const formData = new FormData()
-      formData.append("file", selectedFile)
-      const uploadResp = await fetch("/api/manuals/upload", {
-        method: "POST",
-        body: formData,
-      })
-      const uploadData = await uploadResp.json()
-      if (!uploadResp.ok) throw new Error(uploadData.error || "Upload failed")
 
-      // 2. Register manual record
+    try {
+      const supabase = createClient()
+
+      // Check admin status first
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("ログインが必要です")
+
+      const { data: adminRow } = await supabase
+        .from("admin_users")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .single()
+      if (!adminRow) throw new Error("管理者権限が必要です")
+
+      // Build storage path
+      const timestamp = Date.now()
+      const random = Math.random().toString(36).slice(2, 8)
+      const safeName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")
+      const storagePath = `${user.id}/${timestamp}-${random}-${safeName}`
+
+      // Upload directly to Supabase Storage from client (no size limit from Next.js)
+      // Use XMLHttpRequest to track upload progress
+      const fileUrl = await new Promise<string>((resolve, reject) => {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+        const xhr = new XMLHttpRequest()
+        xhr.open("POST", `${supabaseUrl}/storage/v1/object/manuals/${storagePath}`)
+        xhr.setRequestHeader("Authorization", `Bearer ${supabaseKey}`)
+        xhr.setRequestHeader("Content-Type", "application/pdf")
+        xhr.setRequestHeader("x-upsert", "false")
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setUploadProgress(Math.round((e.loaded / e.total) * 90))
+          }
+        }
+
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            // Public URL for public bucket
+            const publicUrl = `${supabaseUrl}/storage/v1/object/public/manuals/${storagePath}`
+            resolve(publicUrl)
+          } else {
+            try {
+              const err = JSON.parse(xhr.responseText)
+              reject(new Error(err.error || err.message || `Upload failed: ${xhr.status}`))
+            } catch {
+              reject(new Error(`Upload failed: ${xhr.status}`))
+            }
+          }
+        }
+
+        xhr.onerror = () => reject(new Error("ネットワークエラーが発生しました"))
+        xhr.send(selectedFile)
+      })
+
+      setUploadProgress(95)
+
+      // Register manual record via API
       const registerResp = await fetch("/api/manuals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -94,21 +144,24 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
           title: title.trim(),
           model_name: modelName.trim() || null,
           manual_type: manualType || null,
-          storage_path: uploadData.path,
-          file_url: uploadData.url,
-          file_size_bytes: uploadData.file_size_bytes,
+          storage_path: storagePath,
+          file_url: fileUrl,
+          file_size_bytes: selectedFile.size,
         }),
       })
       const registerData = await registerResp.json()
-      if (!registerResp.ok) throw new Error(registerData.error || "Register failed")
+      if (!registerResp.ok) throw new Error(registerData.error || "登録に失敗しました")
 
+      setUploadProgress(100)
       onUpload(registerData.manual)
+
       // Reset form
       setTitle("")
       setModelName("")
       setManualType("")
       setSelectedFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ""
+      setTimeout(() => setUploadProgress(0), 1000)
     } catch (e) {
       setError(e instanceof Error ? e.message : "アップロードに失敗しました")
     } finally {
@@ -188,8 +241,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
             </div>
             <div className="col-span-2 space-y-1">
               <Label htmlFor="pdf-file">PDF File *</Label>
-              {/* Use a visible label wrapping the input for iOS Safari compatibility.
-                  Hidden inputs triggered via .click() are blocked on iOS. */}
+              {/* Label wrapping input for iOS Safari compatibility */}
               <label
                 htmlFor="pdf-file"
                 className="flex items-center gap-2 w-full cursor-pointer rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background hover:bg-accent hover:text-accent-foreground"
@@ -214,6 +266,17 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
               </label>
             </div>
           </div>
+
+          {/* Upload progress bar */}
+          {uploading && (
+            <div className="space-y-1">
+              <Progress value={uploadProgress} className="h-2" />
+              <p className="text-xs text-muted-foreground text-center">
+                {uploadProgress < 90 ? `Uploading... ${uploadProgress}%` : uploadProgress < 100 ? "Registering..." : "Complete!"}
+              </p>
+            </div>
+          )}
+
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button
             onClick={handleUpload}

@@ -6,6 +6,12 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Increase body size limit for manual PDF uploads (default is 4MB)
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "50mb",
+    },
+  },
 }
 
 export default nextConfig

@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 
+// Increase body size limit for large PDF uploads (default is 4MB)
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "50mb",
+    },
+    responseLimit: "50mb",
+  },
+}
+
 // POST /api/manuals/upload — upload a PDF to the manuals bucket (admin only)
 export async function POST(request: NextRequest) {
   try {
