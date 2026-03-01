@@ -30,7 +30,6 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
 import { BookOpen, Trash2, Upload, FileText, Loader2, Settings } from "lucide-react"
 import type { Manual } from "@/lib/manuals"
 import { MANUAL_TYPES } from "@/lib/manuals"
@@ -45,7 +44,7 @@ interface ManualManagerProps {
 export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProps) {
   const [open, setOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "registering" | "done">("idle")
   const [error, setError] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [modelName, setModelName] = useState("")
@@ -74,13 +73,13 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       return
     }
     setUploading(true)
-    setUploadProgress(0)
+    setUploadStatus("uploading")
     setError(null)
 
     try {
       const supabase = createClient()
 
-      // Check admin status first
+      // Verify admin status
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("ログインが必要です")
 
@@ -97,44 +96,24 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       const safeName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")
       const storagePath = `${user.id}/${timestamp}-${random}-${safeName}`
 
-      // Upload directly to Supabase Storage from client (no size limit from Next.js)
-      // Use XMLHttpRequest to track upload progress
-      const fileUrl = await new Promise<string>((resolve, reject) => {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      // Upload using Supabase JS SDK (automatically uses session token)
+      const { error: uploadError } = await supabase.storage
+        .from("manuals")
+        .upload(storagePath, selectedFile, {
+          contentType: "application/pdf",
+          upsert: false,
+        })
 
-        const xhr = new XMLHttpRequest()
-        xhr.open("POST", `${supabaseUrl}/storage/v1/object/manuals/${storagePath}`)
-        xhr.setRequestHeader("Authorization", `Bearer ${supabaseKey}`)
-        xhr.setRequestHeader("Content-Type", "application/pdf")
-        xhr.setRequestHeader("x-upsert", "false")
+      if (uploadError) {
+        throw new Error(uploadError.message)
+      }
 
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            setUploadProgress(Math.round((e.loaded / e.total) * 90))
-          }
-        }
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from("manuals")
+        .getPublicUrl(storagePath)
 
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            // Public URL for public bucket
-            const publicUrl = `${supabaseUrl}/storage/v1/object/public/manuals/${storagePath}`
-            resolve(publicUrl)
-          } else {
-            try {
-              const err = JSON.parse(xhr.responseText)
-              reject(new Error(err.error || err.message || `Upload failed: ${xhr.status}`))
-            } catch {
-              reject(new Error(`Upload failed: ${xhr.status}`))
-            }
-          }
-        }
-
-        xhr.onerror = () => reject(new Error("ネットワークエラーが発生しました"))
-        xhr.send(selectedFile)
-      })
-
-      setUploadProgress(95)
+      setUploadStatus("registering")
 
       // Register manual record via API
       const registerResp = await fetch("/api/manuals", {
@@ -145,25 +124,29 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
           model_name: modelName.trim() || null,
           manual_type: manualType || null,
           storage_path: storagePath,
-          file_url: fileUrl,
+          file_url: urlData.publicUrl,
           file_size_bytes: selectedFile.size,
         }),
       })
       const registerData = await registerResp.json()
       if (!registerResp.ok) throw new Error(registerData.error || "登録に失敗しました")
 
-      setUploadProgress(100)
+      setUploadStatus("done")
       onUpload(registerData.manual)
 
-      // Reset form
-      setTitle("")
-      setModelName("")
-      setManualType("")
-      setSelectedFile(null)
-      if (fileInputRef.current) fileInputRef.current.value = ""
-      setTimeout(() => setUploadProgress(0), 1000)
+      // Reset form after short delay
+      setTimeout(() => {
+        setTitle("")
+        setModelName("")
+        setManualType("")
+        setSelectedFile(null)
+        if (fileInputRef.current) fileInputRef.current.value = ""
+        setUploadStatus("idle")
+      }, 1500)
+
     } catch (e) {
       setError(e instanceof Error ? e.message : "アップロードに失敗しました")
+      setUploadStatus("idle")
     } finally {
       setUploading(false)
     }
@@ -186,6 +169,15 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
     if (!bytes) return ""
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const statusLabel = () => {
+    switch (uploadStatus) {
+      case "uploading": return "Uploading to storage..."
+      case "registering": return "Registering manual..."
+      case "done": return "Upload complete!"
+      default: return ""
+    }
   }
 
   return (
@@ -215,6 +207,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g. ERSF-NM6E-U1 Service Manual"
+                disabled={uploading}
               />
             </div>
             <div className="space-y-1">
@@ -224,11 +217,12 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 placeholder="e.g. ERSF-NM6E-U1"
+                disabled={uploading}
               />
             </div>
             <div className="space-y-1">
               <Label htmlFor="manual-type">Manual Type</Label>
-              <Select value={manualType} onValueChange={setManualType}>
+              <Select value={manualType} onValueChange={setManualType} disabled={uploading}>
                 <SelectTrigger id="manual-type">
                   <SelectValue placeholder="Select type..." />
                 </SelectTrigger>
@@ -244,7 +238,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
               {/* Label wrapping input for iOS Safari compatibility */}
               <label
                 htmlFor="pdf-file"
-                className="flex items-center gap-2 w-full cursor-pointer rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background hover:bg-accent hover:text-accent-foreground"
+                className={`flex items-center gap-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background ${uploading ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-accent hover:text-accent-foreground"}`}
               >
                 <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span className="flex-1 truncate text-muted-foreground">
@@ -261,30 +255,33 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
                   type="file"
                   accept=".pdf,application/pdf"
                   onChange={handleFileChange}
+                  disabled={uploading}
                   className="sr-only"
                 />
               </label>
             </div>
           </div>
 
-          {/* Upload progress bar */}
+          {/* Upload status */}
           {uploading && (
-            <div className="space-y-1">
-              <Progress value={uploadProgress} className="h-2" />
-              <p className="text-xs text-muted-foreground text-center">
-                {uploadProgress < 90 ? `Uploading... ${uploadProgress}%` : uploadProgress < 100 ? "Registering..." : "Complete!"}
-              </p>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{statusLabel()}</span>
             </div>
+          )}
+          {uploadStatus === "done" && (
+            <div className="text-sm text-green-600 font-medium">✓ {statusLabel()}</div>
           )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
+
           <Button
             onClick={handleUpload}
             disabled={uploading || !selectedFile || !title.trim()}
             className="w-full gap-2"
           >
             {uploading ? (
-              <><Loader2 className="h-4 w-4 animate-spin" />Uploading...</>
+              <><Loader2 className="h-4 w-4 animate-spin" />{statusLabel()}</>
             ) : (
               <><Upload className="h-4 w-4" />Upload Manual</>
             )}
