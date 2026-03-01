@@ -41,9 +41,48 @@ interface ManualManagerProps {
   onDelete: (id: string) => void
 }
 
+/** Upload a file via XMLHttpRequest with progress callback.
+ *  Returns the response text on success, throws on error.
+ */
+function xhrUpload(
+  url: string,
+  file: File,
+  token: string,
+  onProgress: (pct: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("POST", url, true)
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`)
+    xhr.setRequestHeader("Content-Type", "application/pdf")
+    xhr.setRequestHeader("x-upsert", "false")
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100))
+      }
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.responseText)
+      } else {
+        reject(new Error(`Storage upload failed (${xhr.status}): ${xhr.responseText}`))
+      }
+    }
+
+    xhr.onerror = () => reject(new Error("Network error during upload"))
+    xhr.ontimeout = () => reject(new Error("Upload timed out"))
+    xhr.timeout = 5 * 60 * 1000 // 5 minute timeout for large files
+
+    xhr.send(file)
+  })
+}
+
 export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProps) {
   const [open, setOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "registering" | "done">("idle")
   const [error, setError] = useState<string | null>(null)
   const [title, setTitle] = useState("")
@@ -74,6 +113,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
     }
     setUploading(true)
     setUploadStatus("uploading")
+    setUploadProgress(0)
     setError(null)
 
     try {
@@ -90,42 +130,31 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
         .single()
       if (!adminRow) throw new Error("管理者権限が必要です")
 
+      // Get session token for authenticated upload
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error("セッションが見つかりません。再ログインしてください")
+
       // Build storage path
       const timestamp = Date.now()
       const random = Math.random().toString(36).slice(2, 8)
       const safeName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")
       const storagePath = `${user.id}/${timestamp}-${random}-${safeName}`
 
-      // Get session token for authenticated upload
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) throw new Error("セッションが見つかりません。再ログインしてください")
-
-      // Read file as ArrayBuffer first (required for iOS Safari - body: File doesn't work)
-      const arrayBuffer = await selectedFile.arrayBuffer()
-
-      // Upload directly via fetch with auth token
+      // Upload via XHR (most reliable for large files on iOS Safari)
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
       const uploadUrl = `${supabaseUrl}/storage/v1/object/manuals/${storagePath}`
-      const uploadResp = await fetch(uploadUrl, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${session.access_token}`,
-          "Content-Type": "application/pdf",
-          "x-upsert": "false",
-        },
-        body: arrayBuffer,
+
+      await xhrUpload(uploadUrl, selectedFile, session.access_token, (pct) => {
+        setUploadProgress(pct)
       })
-      if (!uploadResp.ok) {
-        const errText = await uploadResp.text()
-        throw new Error(`Storage upload failed: ${errText}`)
-      }
+
+      setUploadProgress(100)
+      setUploadStatus("registering")
 
       // Get public URL
       const { data: urlData } = supabase.storage
         .from("manuals")
         .getPublicUrl(storagePath)
-
-      setUploadStatus("registering")
 
       // Register manual record via API
       const registerResp = await fetch("/api/manuals", {
@@ -154,11 +183,13 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
         setSelectedFile(null)
         if (fileInputRef.current) fileInputRef.current.value = ""
         setUploadStatus("idle")
+        setUploadProgress(0)
       }, 1500)
 
     } catch (e) {
       setError(e instanceof Error ? e.message : "アップロードに失敗しました")
       setUploadStatus("idle")
+      setUploadProgress(0)
     } finally {
       setUploading(false)
     }
@@ -185,9 +216,9 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
 
   const statusLabel = () => {
     switch (uploadStatus) {
-      case "uploading": return "Uploading to storage..."
-      case "registering": return "Registering manual..."
-      case "done": return "Upload complete!"
+      case "uploading": return `ストレージにアップロード中... ${uploadProgress}%`
+      case "registering": return "マニュアルを登録中..."
+      case "done": return "アップロード完了！"
       default: return ""
     }
   }
@@ -274,13 +305,32 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
             </div>
           </div>
 
-          {/* Upload status */}
-          {uploading && (
+          {/* Upload progress bar */}
+          {uploading && uploadStatus === "uploading" && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {statusLabel()}
+                </span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div
+                  className="bg-primary h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Registering status */}
+          {uploading && uploadStatus === "registering" && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>{statusLabel()}</span>
             </div>
           )}
+
           {uploadStatus === "done" && (
             <div className="text-sm text-green-600 font-medium">✓ {statusLabel()}</div>
           )}
@@ -312,29 +362,28 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
                   key={manual.id}
                   className="flex items-center justify-between p-3 border rounded-lg bg-background"
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-sm truncate">{manual.title}</span>
-                      {manual.manual_type && (
-                        <Badge variant="secondary" className="text-xs shrink-0">
-                          {manual.manual_type}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {manual.model_name && (
-                        <span className="text-xs text-muted-foreground">{manual.model_name}</span>
-                      )}
-                      {manual.file_size_bytes && (
-                        <span className="text-xs text-muted-foreground">
-                          · {formatFileSize(manual.file_size_bytes)}
-                        </span>
-                      )}
+                  <div className="flex items-start gap-2 min-w-0">
+                    <FileText className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{manual.title}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                        {manual.model_name && (
+                          <span className="text-xs text-muted-foreground">{manual.model_name}</span>
+                        )}
+                        {manual.manual_type && (
+                          <Badge variant="secondary" className="text-xs">{manual.manual_type}</Badge>
+                        )}
+                        {manual.file_size_bytes && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatFileSize(manual.file_size_bytes)}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive shrink-0">
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 text-destructive hover:text-destructive">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </AlertDialogTrigger>
@@ -342,16 +391,16 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
                       <AlertDialogHeader>
                         <AlertDialogTitle>Delete Manual</AlertDialogTitle>
                         <AlertDialogDescription>
-                          &quot;{manual.title}&quot; を削除しますか？この操作は取り消せません。
+                          &ldquo;{manual.title}&rdquo; を削除しますか？この操作は元に戻せません。
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogCancel>キャンセル</AlertDialogCancel>
                         <AlertDialogAction
                           onClick={() => handleDelete(manual.id)}
                           className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                         >
-                          Delete
+                          削除
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>

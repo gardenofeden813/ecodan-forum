@@ -25,6 +25,7 @@ import {
   BookOpen,
   ZoomIn,
   ZoomOut,
+  X,
 } from "lucide-react"
 import type { Manual, ManualCitation } from "@/lib/manuals"
 import { Badge } from "@/components/ui/badge"
@@ -35,7 +36,6 @@ let pdfjsLib: typeof import("pdfjs-dist") | null = null
 async function getPdfjs() {
   if (!pdfjsLib) {
     pdfjsLib = await import("pdfjs-dist")
-    // Use local worker from public directory
     pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"
   }
   return pdfjsLib
@@ -95,7 +95,6 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
     ;(async () => {
       try {
         const pdfjs = await getPdfjs()
-        // Cancel previous loading task
         if (loadingTaskRef.current) {
           await loadingTaskRef.current.destroy().catch(() => {})
         }
@@ -123,7 +122,6 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
     const textLayer = textLayerRef.current
     const pageContainer = pageContainerRef.current
 
-    // Cancel previous render
     if (renderTaskRef.current) {
       renderTaskRef.current.cancel()
       renderTaskRef.current = null
@@ -133,22 +131,18 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
       const page = await doc.getPage(pageNum)
       const viewport = page.getViewport({ scale: sc })
 
-      // Set canvas dimensions
       canvas.width = viewport.width
       canvas.height = viewport.height
 
-      // Render PDF page to canvas
       const renderTask = page.render({ canvas, viewport })
       renderTaskRef.current = renderTask
       await renderTask.promise
 
-      // Set --total-scale-factor on the page container
-      // This is REQUIRED by pdfjs-dist v4+ TextLayer CSS for correct positioning
+      // Set --total-scale-factor required by pdfjs-dist v5 TextLayer CSS
       pageContainer.style.setProperty("--total-scale-factor", String(sc))
       pageContainer.style.width = `${viewport.width}px`
       pageContainer.style.height = `${viewport.height}px`
 
-      // Clear and resize text layer
       textLayer.innerHTML = ""
       textLayer.style.width = `${viewport.width}px`
       textLayer.style.height = `${viewport.height}px`
@@ -156,7 +150,6 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
       const textContent = await page.getTextContent()
       const pdfjs = await getPdfjs()
 
-      // Use TextLayer class from pdfjs-dist v5
       const textLayerInstance = new pdfjs.TextLayer({
         textContentSource: textContent,
         container: textLayer,
@@ -221,13 +214,40 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
     }
   }
 
-  // Capture selected text from text layer
+  // Capture selected text from text layer (mouse/touch selection)
   const handleTextSelection = () => {
     const selection = window.getSelection()
     if (selection && selection.toString().trim()) {
       setSelectedText(selection.toString().trim())
     }
   }
+
+  // Tap on a text span to select its paragraph (mobile-friendly)
+  const handleTextLayerTap = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement
+    // Find the nearest span with text
+    const span = target.closest("span")
+    if (!span || !textLayerRef.current) return
+
+    // Collect all sibling spans that are close vertically (same line/paragraph)
+    const allSpans = Array.from(textLayerRef.current.querySelectorAll("span"))
+    const tapRect = span.getBoundingClientRect()
+    const lineHeight = tapRect.height * 3 // group spans within 3 line heights
+
+    // Find spans in the same paragraph block (within lineHeight vertically)
+    const paraSpans = allSpans.filter((s) => {
+      const r = s.getBoundingClientRect()
+      return Math.abs(r.top - tapRect.top) < lineHeight && r.width > 0
+    })
+
+    const text = paraSpans.map((s) => s.textContent || "").join(" ").trim()
+    if (text) {
+      setSelectedText(text)
+      // Visual feedback: briefly highlight
+      span.style.backgroundColor = "rgba(255, 230, 0, 0.6)"
+      setTimeout(() => { span.style.backgroundColor = "" }, 800)
+    }
+  }, [])
 
   // Capture highlighted region as base64 image and create citation
   const handleCite = useCallback(async () => {
@@ -242,21 +262,18 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
         const canvasRect = canvasRef.current.getBoundingClientRect()
         const selectionRect = range.getBoundingClientRect()
 
-        // Calculate intersection with canvas
         const x = Math.max(0, selectionRect.left - canvasRect.left)
         const y = Math.max(0, selectionRect.top - canvasRect.top)
         const w = Math.min(selectionRect.width, canvasRect.width - x)
         const h = Math.min(selectionRect.height + 8, canvasRect.height - y)
 
         if (w > 0 && h > 0) {
-          // Draw canvas region to a new canvas with highlight
           const offscreen = document.createElement("canvas")
           const padding = 8
           offscreen.width = Math.min(w + padding * 2, canvasRef.current.width)
           offscreen.height = Math.min(h + padding * 2, canvasRef.current.height)
           const ctx = offscreen.getContext("2d")!
 
-          // Draw the page region
           ctx.drawImage(
             canvasRef.current,
             Math.max(0, x - padding),
@@ -268,7 +285,6 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
             offscreen.height
           )
 
-          // Draw yellow highlight overlay
           ctx.fillStyle = "rgba(255, 230, 0, 0.35)"
           ctx.fillRect(padding, padding, w, h - 8)
 
@@ -297,20 +313,30 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-4xl w-full max-h-[90vh] flex flex-col p-0 gap-0">
-        <DialogHeader className="px-4 pt-4 pb-2 border-b shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <BookOpen className="h-5 w-5" />
-            Cite from Manual
-          </DialogTitle>
+      {/* Full-screen on mobile so the Cite button is always visible */}
+      <DialogContent
+        className="flex flex-col p-0 gap-0 w-full h-full max-w-none max-h-none sm:max-w-4xl sm:max-h-[90vh] sm:h-auto sm:rounded-lg rounded-none"
+        style={{ height: "100dvh" }}
+      >
+        {/* Header */}
+        <DialogHeader className="px-3 pt-3 pb-2 border-b shrink-0">
+          <div className="flex items-center justify-between">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <BookOpen className="h-4 w-4" />
+              マニュアルから引用
+            </DialogTitle>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </DialogHeader>
 
         {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b bg-muted/20 shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b bg-muted/20 shrink-0">
           {/* Manual selector */}
           <Select value={selectedManualId} onValueChange={setSelectedManualId}>
-            <SelectTrigger className="w-64 h-8 text-sm">
-              <SelectValue placeholder="Select a manual..." />
+            <SelectTrigger className="h-8 text-sm flex-1 min-w-0 max-w-xs">
+              <SelectValue placeholder="マニュアルを選択..." />
             </SelectTrigger>
             <SelectContent>
               {manuals.map((m) => (
@@ -329,8 +355,8 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
           {/* Search */}
           <div className="flex items-center gap-1">
             <Input
-              className="h-8 w-40 text-sm"
-              placeholder="Search text..."
+              className="h-8 w-28 text-sm"
+              placeholder="検索..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -357,42 +383,42 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
 
           {/* Page navigation */}
           {totalPages > 0 && (
-            <div className="flex items-center gap-1 ml-auto">
+            <div className="flex items-center gap-0.5 ml-auto">
               <Button
-                size="sm" variant="ghost" className="h-8 px-1"
+                size="sm" variant="ghost" className="h-8 w-8 p-0"
                 onClick={() => { const p = currentPage - 1; if (p >= 1) { setCurrentPage(p); setPageInput(String(p)) } }}
                 disabled={currentPage <= 1}
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </Button>
               <Input
-                className="h-8 w-12 text-sm text-center"
+                className="h-8 w-10 text-sm text-center px-1"
                 value={pageInput}
                 onChange={(e) => handlePageInput(e.target.value)}
               />
-              <span className="text-xs text-muted-foreground">/ {totalPages}</span>
+              <span className="text-xs text-muted-foreground px-1">/{totalPages}</span>
               <Button
-                size="sm" variant="ghost" className="h-8 px-1"
+                size="sm" variant="ghost" className="h-8 w-8 p-0"
                 onClick={() => { const p = currentPage + 1; if (p <= totalPages) { setCurrentPage(p); setPageInput(String(p)) } }}
                 disabled={currentPage >= totalPages}
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>
-              <Button size="sm" variant="ghost" className="h-8 px-1" onClick={() => setScale((s) => Math.min(s + 0.2, 3))}>
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setScale((s) => Math.min(s + 0.2, 3))}>
                 <ZoomIn className="h-3.5 w-3.5" />
               </Button>
-              <Button size="sm" variant="ghost" className="h-8 px-1" onClick={() => setScale((s) => Math.max(s - 0.2, 0.5))}>
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setScale((s) => Math.max(s - 0.2, 0.5))}>
                 <ZoomOut className="h-3.5 w-3.5" />
               </Button>
             </div>
           )}
         </div>
 
-        {/* PDF Canvas area */}
-        <div className="flex-1 overflow-auto bg-gray-100 p-4 min-h-0">
+        {/* PDF Canvas area — flex-1 so it fills remaining space */}
+        <div className="flex-1 overflow-auto bg-gray-100 min-h-0">
           {!selectedManualId && (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              <p>Select a manual to view</p>
+            <div className="flex items-center justify-center h-full text-muted-foreground p-8 text-center">
+              <p className="text-sm">上のセレクターからマニュアルを選んでください</p>
             </div>
           )}
           {selectedManualId && loading && (
@@ -401,52 +427,65 @@ export function PdfViewerDialog({ open, onClose, manuals, onCite }: PdfViewerDia
             </div>
           )}
           {selectedManualId && !loading && pdfDoc && (
-            /* pageContainerRef holds --total-scale-factor for PDF.js TextLayer CSS */
-            <div
-              ref={pageContainerRef}
-              className="relative inline-block mx-auto shadow-lg"
-              style={{ position: "relative" }}
-              onMouseUp={handleTextSelection}
-            >
-              <canvas ref={canvasRef} className="block" />
+            <div className="p-2 sm:p-4 flex justify-center">
+              {/* pageContainerRef holds --total-scale-factor for PDF.js TextLayer CSS */}
               <div
-                ref={textLayerRef}
-                className="textLayer"
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  pointerEvents: "auto",
-                }}
-              />
+                ref={pageContainerRef}
+                className="relative shadow-lg inline-block"
+                style={{ position: "relative" }}
+                onMouseUp={handleTextSelection}
+                onClick={handleTextLayerTap}
+              >
+                <canvas ref={canvasRef} className="block" />
+                <div
+                  ref={textLayerRef}
+                  className="textLayer"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    pointerEvents: "auto",
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>
 
-        {/* Footer: selected text + cite button */}
-        <div className="flex items-center gap-3 px-4 py-3 border-t bg-background shrink-0">
-          <div className="flex-1 min-w-0">
+        {/* Footer: sticky at bottom, always visible */}
+        <div className="shrink-0 border-t bg-background px-3 py-3 safe-area-inset-bottom">
+          {/* Selected text preview */}
+          <div className="mb-2 min-h-[2rem]">
             {selectedText ? (
-              <p className="text-xs text-muted-foreground truncate italic">
-                Selected: &ldquo;{selectedText}&rdquo;
-              </p>
+              <div className="flex items-start gap-2">
+                <p className="text-xs text-muted-foreground italic flex-1 line-clamp-2">
+                  &ldquo;{selectedText}&rdquo;
+                </p>
+                <button
+                  className="text-xs text-muted-foreground shrink-0 hover:text-foreground"
+                  onClick={() => setSelectedText("")}
+                >
+                  ✕
+                </button>
+              </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Drag to select text on the page, then click &quot;Cite This&quot;
+                テキストをタップ（またはドラッグ）して選択 → 「引用する」をタップ
               </p>
             )}
           </div>
+          {/* Cite button — large for mobile */}
           <Button
             onClick={handleCite}
-            disabled={!selectedManualId || !pdfDoc || isCiting}
-            className="gap-2 shrink-0"
+            disabled={!selectedManualId || !pdfDoc || isCiting || !selectedText}
+            className="w-full gap-2 h-12 text-base"
           >
             {isCiting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
-              <Quote className="h-4 w-4" />
+              <Quote className="h-5 w-5" />
             )}
-            Cite This (p.{currentPage})
+            引用する（p.{currentPage}）
           </Button>
         </div>
       </DialogContent>
