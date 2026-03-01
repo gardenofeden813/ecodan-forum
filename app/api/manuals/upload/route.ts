@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
+import { createClient } from "@supabase/supabase-js"
 import { cookies } from "next/headers"
 
-// Increase body size limit for large PDF uploads (default is 4MB)
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: "50mb",
-    },
-    responseLimit: "50mb",
-  },
-}
-
-// POST /api/manuals/upload — upload a PDF to the manuals bucket (admin only)
+// POST /api/manuals/upload
+// Body: { fileName: string }
+// Returns: { signedUrl, token, path, publicUrl }
+// The client uploads the file directly to Supabase Storage via XHR PUT to signedUrl.
+// This avoids Next.js body size limits entirely.
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = await cookies()
@@ -42,52 +37,43 @@ export async function POST(request: NextRequest) {
       .single()
     if (!adminRow) return NextResponse.json({ error: "Forbidden: admin only" }, { status: 403 })
 
-    const formData = await request.formData()
-    const file = formData.get("file") as File | null
-    if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 })
-    // iOS Safari may send PDF with empty or different MIME type
-    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
-    if (!isPdf) {
-      return NextResponse.json({ error: "Only PDF files are allowed" }, { status: 400 })
-    }
+    const body = await request.json()
+    const { fileName } = body as { fileName: string }
+    if (!fileName) return NextResponse.json({ error: "fileName required" }, { status: 400 })
 
     const timestamp = Date.now()
     const random = Math.random().toString(36).slice(2, 8)
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_")
-    const path = `${user.id}/${timestamp}-${random}-${safeName}`
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_")
+    const storagePath = `${user.id}/${timestamp}-${random}-${safeName}`
 
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = new Uint8Array(arrayBuffer)
+    // Use service role key if available (needed for createSignedUploadUrl)
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const adminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceKey
+    )
 
-    const { error: uploadError } = await supabase.storage
+    const { data: signedData, error: signedError } = await adminClient.storage
       .from("manuals")
-      .upload(path, buffer, {
-        contentType: "application/pdf",
-        upsert: false,
-      })
-
-    if (uploadError) {
-      console.error("Manual upload error:", uploadError)
-      return NextResponse.json({ error: uploadError.message }, { status: 500 })
-    }
-
-    // Generate a signed URL (valid for 10 years = long-lived)
-    const { data: signedData, error: signedError } = await supabase.storage
-      .from("manuals")
-      .createSignedUrl(path, 60 * 60 * 24 * 365 * 10)
+      .createSignedUploadUrl(storagePath)
 
     if (signedError || !signedData) {
-      return NextResponse.json({ error: "Failed to generate URL" }, { status: 500 })
+      console.error("createSignedUploadUrl error:", signedError)
+      return NextResponse.json({ error: signedError?.message || "Failed to create signed URL" }, { status: 500 })
     }
 
+    const { data: publicUrlData } = adminClient.storage
+      .from("manuals")
+      .getPublicUrl(storagePath)
+
     return NextResponse.json({
-      success: true,
-      path,
-      url: signedData.signedUrl,
-      file_size_bytes: file.size,
+      signedUrl: signedData.signedUrl,
+      token: signedData.token,
+      path: storagePath,
+      publicUrl: publicUrlData.publicUrl,
     })
   } catch (e) {
-    console.error("Manual upload error:", e)
+    console.error("Signed URL generation error:", e)
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }
 }

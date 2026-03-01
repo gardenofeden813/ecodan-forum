@@ -35,6 +35,9 @@ import type { Manual } from "@/lib/manuals"
 import { MANUAL_TYPES } from "@/lib/manuals"
 import { createClient } from "@/lib/supabase/client"
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
 interface ManualManagerProps {
   manuals: Manual[]
   onUpload: (manual: Manual) => void
@@ -51,6 +54,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
   const [manualType, setManualType] = useState<string>("")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const xhrRef = useRef<XMLHttpRequest | null>(null)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -79,15 +83,15 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
     try {
       const supabase = createClient()
 
-      // Verify user is logged in
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("You must be logged in.")
+      // Get the current session access token
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error("You must be logged in.")
 
       // Verify admin
       const { data: adminRow } = await supabase
         .from("admin_users")
         .select("user_id")
-        .eq("user_id", user.id)
+        .eq("user_id", session.user.id)
         .single()
       if (!adminRow) throw new Error("Admin access required.")
 
@@ -95,19 +99,50 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       const timestamp = Date.now()
       const random = Math.random().toString(36).slice(2, 8)
       const safeName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")
-      const storagePath = `${user.id}/${timestamp}-${random}-${safeName}`
+      const storagePath = `${session.user.id}/${timestamp}-${random}-${safeName}`
 
-      setUploadProgress(10)
+      setUploadProgress(5)
 
-      // Upload directly via Supabase JS SDK — no body size limit, works on iOS Chrome
-      const { error: uploadError } = await supabase.storage
-        .from("manuals")
-        .upload(storagePath, selectedFile, {
-          contentType: "application/pdf",
-          upsert: false,
-        })
+      // Upload directly to Supabase Storage REST API via XHR (real progress, no size limit)
+      // Endpoint: POST /storage/v1/object/{bucket}/{path}
+      const uploadUrl = `${SUPABASE_URL}/storage/v1/object/manuals/${storagePath}`
 
-      if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`)
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhrRef.current = xhr
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            // Map upload progress to 5–75%
+            const pct = Math.round(5 + (e.loaded / e.total) * 70)
+            setUploadProgress(pct)
+          }
+        }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve()
+          } else {
+            let msg = `Storage upload failed: HTTP ${xhr.status}`
+            try {
+              const body = JSON.parse(xhr.responseText)
+              if (body.message || body.error) msg += ` — ${body.message || body.error}`
+            } catch { /* ignore */ }
+            reject(new Error(msg))
+          }
+        }
+
+        xhr.onerror = () => reject(new Error("Network error during upload. Please check your connection."))
+        xhr.ontimeout = () => reject(new Error("Upload timed out. Please try again."))
+        xhr.timeout = 10 * 60 * 1000 // 10 minutes
+
+        xhr.open("POST", uploadUrl, true)
+        xhr.setRequestHeader("Authorization", `Bearer ${session.access_token}`)
+        xhr.setRequestHeader("apikey", SUPABASE_ANON_KEY)
+        xhr.setRequestHeader("Content-Type", "application/pdf")
+        xhr.setRequestHeader("x-upsert", "false")
+        xhr.send(selectedFile)
+      })
 
       setUploadProgress(80)
 
@@ -116,7 +151,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
         .from("manuals")
         .getPublicUrl(storagePath)
 
-      // Register manual record via API
+      // Register manual record in the database
       const registerResp = await fetch("/api/manuals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -150,6 +185,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       setUploadProgress(null)
     } finally {
       setUploading(false)
+      xhrRef.current = null
     }
   }, [selectedFile, title, modelName, manualType, onUpload])
 
@@ -259,13 +295,13 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  {uploadProgress < 80 ? "Uploading to storage..." : uploadProgress < 100 ? "Registering manual..." : "Done!"}
+                  {uploadProgress < 5 ? "Preparing upload..." : uploadProgress < 80 ? "Uploading to storage..." : uploadProgress < 100 ? "Registering manual..." : "Done!"}
                 </span>
                 <span>{uploadProgress}%</span>
               </div>
               <div className="w-full bg-muted rounded-full h-2">
                 <div
-                  className="bg-primary h-2 rounded-full transition-all duration-500"
+                  className="bg-primary h-2 rounded-full transition-all duration-300"
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
