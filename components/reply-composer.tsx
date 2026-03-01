@@ -435,69 +435,65 @@ export function ReplyComposer({
           rows={2}
         />
 
-        {/* Action bar */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1">
-            {/* Image attach */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleImageSelect}
-              className="hidden"
-              aria-label={tr("attachImage")}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={images.length >= 4 || isRecording || isPosting}
-              className="h-9 gap-1.5 rounded-lg px-3 text-muted-foreground hover:text-foreground"
-              aria-label={tr("attachImage")}
-            >
-              <ImagePlus className="size-4" />
-              <span className="hidden text-xs sm:inline">{tr("attachImage")}</span>
-            </Button>
+        {/* Action bar — icon-only buttons on mobile so Post button is never cut off */}
+        <div className="flex items-center gap-1">
+          {/* Image attach */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleImageSelect}
+            className="hidden"
+            aria-label={tr("attachImage")}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={images.length >= 4 || isRecording || isPosting}
+            className="h-9 w-9 rounded-lg p-0 text-muted-foreground hover:text-foreground"
+            aria-label={tr("attachImage")}
+          >
+            <ImagePlus className="size-4" />
+          </Button>
 
-            {/* Voice record */}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={isRecording ? handleStopRecording : startRecording}
-              disabled={isPosting || !!voiceAttachment}
-              className={cn(
-                "h-9 gap-1.5 rounded-lg px-3",
-                isRecording
-                  ? "text-destructive hover:text-destructive"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              aria-label={isRecording ? tr("tapToStop") : tr("attachVoice")}
-            >
-              {isRecording ? <MicOff className="size-4" /> : <Mic className="size-4" />}
-              <span className="hidden text-xs sm:inline">
-                {isRecording ? tr("tapToStop") : tr("attachVoice")}
-              </span>
-            </Button>
+          {/* Voice record */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={isRecording ? handleStopRecording : startRecording}
+            disabled={isPosting || !!voiceAttachment}
+            className={cn(
+              "h-9 w-9 rounded-lg p-0",
+              isRecording
+                ? "text-destructive hover:text-destructive"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            aria-label={isRecording ? tr("tapToStop") : tr("attachVoice")}
+          >
+            {isRecording ? <MicOff className="size-4" /> : <Mic className="size-4" />}
+          </Button>
 
-            {/* Cite manual */}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleOpenPdfViewer}
-              disabled={isPosting || isRecording}
-              className="h-9 gap-1.5 rounded-lg px-3 text-muted-foreground hover:text-foreground"
-              aria-label="Cite from manual"
-            >
-              <Quote className="size-4" />
-              <span className="hidden text-xs sm:inline">Cite Manual</span>
-            </Button>
-          </div>
+          {/* Cite manual */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleOpenPdfViewer}
+            disabled={isPosting || isRecording}
+            className="h-9 w-9 rounded-lg p-0 text-muted-foreground hover:text-foreground"
+            aria-label="Cite from manual"
+          >
+            <Quote className="size-4" />
+          </Button>
 
-          {/* Post button */}
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Post button — always visible */}
           <Button
             onClick={handlePost}
             disabled={!hasContent || isPosting || isRecording}
@@ -509,7 +505,7 @@ export function ReplyComposer({
             ) : (
               <Send className="size-4" />
             )}
-            <span className="hidden sm:inline">{tr("postReply")}</span>
+            <span>{tr("postReply")}</span>
           </Button>
         </div>
       </div>

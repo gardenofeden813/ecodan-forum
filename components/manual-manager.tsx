@@ -41,49 +41,10 @@ interface ManualManagerProps {
   onDelete: (id: string) => void
 }
 
-/** Upload a file via XMLHttpRequest with progress callback.
- *  Returns the response text on success, throws on error.
- */
-function xhrUpload(
-  url: string,
-  file: File,
-  token: string,
-  onProgress: (pct: number) => void
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open("POST", url, true)
-    xhr.setRequestHeader("Authorization", `Bearer ${token}`)
-    xhr.setRequestHeader("Content-Type", "application/pdf")
-    xhr.setRequestHeader("x-upsert", "false")
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        onProgress(Math.round((e.loaded / e.total) * 100))
-      }
-    }
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(xhr.responseText)
-      } else {
-        reject(new Error(`Storage upload failed (${xhr.status}): ${xhr.responseText}`))
-      }
-    }
-
-    xhr.onerror = () => reject(new Error("Network error during upload"))
-    xhr.ontimeout = () => reject(new Error("Upload timed out"))
-    xhr.timeout = 5 * 60 * 1000 // 5 minute timeout for large files
-
-    xhr.send(file)
-  })
-}
-
 export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProps) {
   const [open, setOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "registering" | "done">("idle")
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [modelName, setModelName] = useState("")
@@ -96,7 +57,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
     if (!file) return
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
     if (!isPdf) {
-      setError("PDFファイルのみアップロードできます")
+      setError("Only PDF files are allowed.")
       return
     }
     setSelectedFile(file)
@@ -108,31 +69,27 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
 
   const handleUpload = useCallback(async () => {
     if (!selectedFile || !title.trim()) {
-      setError("タイトルとPDFファイルを入力してください")
+      setError("Please enter a title and select a PDF file.")
       return
     }
     setUploading(true)
-    setUploadStatus("uploading")
     setUploadProgress(0)
     setError(null)
 
     try {
       const supabase = createClient()
 
-      // Verify admin status
+      // Verify user is logged in
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("ログインが必要です")
+      if (!user) throw new Error("You must be logged in.")
 
+      // Verify admin
       const { data: adminRow } = await supabase
         .from("admin_users")
         .select("user_id")
         .eq("user_id", user.id)
         .single()
-      if (!adminRow) throw new Error("管理者権限が必要です")
-
-      // Get session token for authenticated upload
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) throw new Error("セッションが見つかりません。再ログインしてください")
+      if (!adminRow) throw new Error("Admin access required.")
 
       // Build storage path
       const timestamp = Date.now()
@@ -140,16 +97,19 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       const safeName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")
       const storagePath = `${user.id}/${timestamp}-${random}-${safeName}`
 
-      // Upload via XHR (most reliable for large files on iOS Safari)
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-      const uploadUrl = `${supabaseUrl}/storage/v1/object/manuals/${storagePath}`
+      setUploadProgress(10)
 
-      await xhrUpload(uploadUrl, selectedFile, session.access_token, (pct) => {
-        setUploadProgress(pct)
-      })
+      // Upload directly via Supabase JS SDK — no body size limit, works on iOS Chrome
+      const { error: uploadError } = await supabase.storage
+        .from("manuals")
+        .upload(storagePath, selectedFile, {
+          contentType: "application/pdf",
+          upsert: false,
+        })
 
-      setUploadProgress(100)
-      setUploadStatus("registering")
+      if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`)
+
+      setUploadProgress(80)
 
       // Get public URL
       const { data: urlData } = supabase.storage
@@ -170,26 +130,24 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
         }),
       })
       const registerData = await registerResp.json()
-      if (!registerResp.ok) throw new Error(registerData.error || "登録に失敗しました")
+      if (!registerResp.ok) throw new Error(registerData.error || "Failed to register manual.")
 
-      setUploadStatus("done")
+      setUploadProgress(100)
       onUpload(registerData.manual)
 
-      // Reset form after short delay
+      // Reset form
       setTimeout(() => {
         setTitle("")
         setModelName("")
         setManualType("")
         setSelectedFile(null)
         if (fileInputRef.current) fileInputRef.current.value = ""
-        setUploadStatus("idle")
-        setUploadProgress(0)
+        setUploadProgress(null)
       }, 1500)
 
     } catch (e) {
-      setError(e instanceof Error ? e.message : "アップロードに失敗しました")
-      setUploadStatus("idle")
-      setUploadProgress(0)
+      setError(e instanceof Error ? e.message : "Upload failed. Please try again.")
+      setUploadProgress(null)
     } finally {
       setUploading(false)
     }
@@ -204,7 +162,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
       }
       onDelete(id)
     } catch (e) {
-      alert(e instanceof Error ? e.message : "削除に失敗しました")
+      alert(e instanceof Error ? e.message : "Failed to delete manual.")
     }
   }
 
@@ -212,15 +170,6 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
     if (!bytes) return ""
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  }
-
-  const statusLabel = () => {
-    switch (uploadStatus) {
-      case "uploading": return `ストレージにアップロード中... ${uploadProgress}%`
-      case "registering": return "マニュアルを登録中..."
-      case "done": return "アップロード完了！"
-      default: return ""
-    }
   }
 
   return (
@@ -278,7 +227,6 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
             </div>
             <div className="col-span-2 space-y-1">
               <Label htmlFor="pdf-file">PDF File *</Label>
-              {/* Label wrapping input for iOS Safari compatibility */}
               <label
                 htmlFor="pdf-file"
                 className={`flex items-center gap-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background ${uploading ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-accent hover:text-accent-foreground"}`}
@@ -305,34 +253,27 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
             </div>
           </div>
 
-          {/* Upload progress bar */}
-          {uploading && uploadStatus === "uploading" && (
-            <div className="space-y-1">
+          {/* Upload progress */}
+          {uploading && uploadProgress !== null && (
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
+                <span className="flex items-center gap-1.5">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  {statusLabel()}
+                  {uploadProgress < 80 ? "Uploading to storage..." : uploadProgress < 100 ? "Registering manual..." : "Done!"}
                 </span>
+                <span>{uploadProgress}%</span>
               </div>
               <div className="w-full bg-muted rounded-full h-2">
                 <div
-                  className="bg-primary h-2 rounded-full transition-all duration-300"
+                  className="bg-primary h-2 rounded-full transition-all duration-500"
                   style={{ width: `${uploadProgress}%` }}
                 />
               </div>
             </div>
           )}
 
-          {/* Registering status */}
-          {uploading && uploadStatus === "registering" && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{statusLabel()}</span>
-            </div>
-          )}
-
-          {uploadStatus === "done" && (
-            <div className="text-sm text-green-600 font-medium">✓ {statusLabel()}</div>
+          {uploadProgress === 100 && !uploading && (
+            <p className="text-sm text-green-600 font-medium">✓ Upload complete!</p>
           )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
@@ -343,7 +284,7 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
             className="w-full gap-2"
           >
             {uploading ? (
-              <><Loader2 className="h-4 w-4 animate-spin" />{statusLabel()}</>
+              <><Loader2 className="h-4 w-4 animate-spin" />Uploading...</>
             ) : (
               <><Upload className="h-4 w-4" />Upload Manual</>
             )}
@@ -391,16 +332,16 @@ export function ManualManager({ manuals, onUpload, onDelete }: ManualManagerProp
                       <AlertDialogHeader>
                         <AlertDialogTitle>Delete Manual</AlertDialogTitle>
                         <AlertDialogDescription>
-                          &ldquo;{manual.title}&rdquo; を削除しますか？この操作は元に戻せません。
+                          Are you sure you want to delete &ldquo;{manual.title}&rdquo;? This action cannot be undone.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
-                        <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
                         <AlertDialogAction
                           onClick={() => handleDelete(manual.id)}
                           className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                         >
-                          削除
+                          Delete
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
