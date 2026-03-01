@@ -301,14 +301,37 @@ export function ForumProvider({ children }: { children: ReactNode }) {
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      setCurrentUser(user)
-      if (user) {
-        await ensureProfile(user)
-        await loadNotificationSettings(user.id)
-      }
-      await loadProfiles()
-      await loadThreads()
+      // Always load threads regardless of auth state — threads are the primary content.
+      // Run auth check and thread load in parallel so a slow auth check doesn't block display.
+      const authPromise = (async () => {
+        try {
+          // 5s timeout on auth check — if it hangs (common on mobile), skip gracefully
+          const authResult = await Promise.race([
+            supabase.auth.getUser(),
+            new Promise<{ data: { user: null } }>((resolve) =>
+              setTimeout(() => resolve({ data: { user: null } }), 5000)
+            ),
+          ])
+          const user = authResult.data.user
+          setCurrentUser(user)
+          if (user) {
+            // Run profile/notification loads in parallel, don't block thread display
+            await Promise.allSettled([
+              ensureProfile(user),
+              loadNotificationSettings(user.id),
+              loadProfiles(),
+            ])
+          }
+        } catch (e) {
+          console.warn("init: auth check failed", e)
+        }
+      })()
+
+      // Load threads immediately — don't wait for auth
+      const threadsPromise = loadThreads()
+
+      // Wait for both to complete
+      await Promise.allSettled([authPromise, threadsPromise])
     }
     init()
   // eslint-disable-next-line react-hooks/exhaustive-deps
